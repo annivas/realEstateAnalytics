@@ -3,11 +3,18 @@ Real Estate Analytics Dashboard - Main Streamlit Application
 """
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Ensure the parent directory is in the path
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+# Ensure data directory exists
+data_dir = project_root / "data"
+data_dir.mkdir(exist_ok=True)
 
 from database.models import init_db, get_session, Property, PropertySnapshot, CollectionRun
 from analytics.price_trends import PriceTrendsAnalyzer
@@ -70,7 +77,7 @@ def get_quick_stats():
     try:
         total_properties = session.query(Property).filter(Property.is_active == True).count()
         
-        week_ago = datetime.utcnow() - timedelta(days=7)
+        week_ago = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=7)
         new_this_week = session.query(Property).filter(Property.first_seen >= week_ago).count()
         
         last_run = (
@@ -602,25 +609,30 @@ def render_data_collection_page():
 
 def main():
     """Main application entry point."""
-    # Initialize database
-    init_db()
-    
-    # Render sidebar and get selected page
-    page = render_sidebar()
-    
-    # Render selected page
-    if page == "Overview":
-        render_overview_page()
-    elif page == "Price Trends":
-        render_price_trends_page()
-    elif page == "Deal Finder":
-        render_deal_finder_page()
-    elif page == "Area Analysis":
-        render_area_analysis_page()
-    elif page == "Agent Insights":
-        render_agent_insights_page()
-    elif page == "Data Collection":
-        render_data_collection_page()
+    try:
+        # Initialize database
+        init_db()
+        
+        # Render sidebar and get selected page
+        page = render_sidebar()
+        
+        # Render selected page
+        if page == "Overview":
+            render_overview_page()
+        elif page == "Price Trends":
+            render_price_trends_page()
+        elif page == "Deal Finder":
+            render_deal_finder_page()
+        elif page == "Area Analysis":
+            render_area_analysis_page()
+        elif page == "Agent Insights":
+            render_agent_insights_page()
+        elif page == "Data Collection":
+            render_data_collection_page()
+    except Exception as e:
+        st.error(f"An error occurred: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
 
 
 if __name__ == "__main__":
