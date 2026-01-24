@@ -1,23 +1,26 @@
 # Real Estate Analytics Engine
-# Compatible with Python 3.8+
+# Pin versions to ensure compatibility
+
+# Dashboard - use recent stable version
+streamlit>=1.32.0
 
 # Database
-sqlalchemy>=1.4.0,<3.0.0
+sqlalchemy>=2.0.0
 
 # HTTP Client
-httpx>=0.23.0
+httpx>=0.25.0
 
 # Scheduler
-apscheduler>=3.9.0
+apscheduler>=3.10.0
 
 # Analytics
-pandas>=1.3.0
-numpy>=1.21.0
+pandas>=2.0.0
+numpy>=1.24.0
 
 # Visualization
-plotly>=5.0.0
-folium>=0.12.0
-streamlit-folium>=0.6.0
+plotly>=5.18.0
+folium>=0.15.0
+streamlit-folium>=0.15.0
 
-# Dashboard
-streamlit>=1.10.0
+# Altair - pinned for Streamlit compatibility
+altair>=5.0.0,<6.0.0
