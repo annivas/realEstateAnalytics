@@ -50,16 +50,17 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Custom CSS
+# Custom CSS - works with both light and dark themes
 st.markdown("""
 <style>
     .main > div {
         padding-top: 2rem;
     }
     .stMetric {
-        background-color: #f0f2f6;
+        background-color: rgba(28, 131, 225, 0.1);
         padding: 1rem;
         border-radius: 0.5rem;
+        border: 1px solid rgba(28, 131, 225, 0.2);
     }
     .stTabs [data-baseweb="tab-list"] {
         gap: 1rem;
