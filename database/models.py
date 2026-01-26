@@ -212,4 +212,108 @@ def init_db():
     """Initialize the database by creating all tables."""
     engine = get_engine()
     Base.metadata.create_all(engine)
+    
+    # Load seed data if database is empty
+    try:
+        _load_seed_data()
+    except Exception as e:
+        print(f"Note: Could not load seed data: {e}")
+    
     return engine
+
+
+def _load_seed_data():
+    """Load seed data from CSV files if database is empty."""
+    import csv
+    from pathlib import Path
+    
+    session = get_session()
+    try:
+        # Check if we already have data
+        if session.query(Property).count() > 0:
+            return
+        
+        data_dir = Path(__file__).parent.parent / "data"
+        
+        # Helper functions
+        def safe_int(val):
+            if not val or val == '' or val == 'None':
+                return None
+            try:
+                return int(float(val))
+            except:
+                return None
+        
+        def safe_float(val):
+            if not val or val == '' or val == 'None':
+                return None
+            try:
+                return float(val)
+            except:
+                return None
+        
+        # Create default collection run
+        run = CollectionRun(id=1, status="completed", properties_found=0)
+        session.merge(run)
+        session.commit()
+        
+        # Load agents
+        agents_csv = data_dir / "agents.csv"
+        if agents_csv.exists():
+            with open(agents_csv, "r", encoding="utf-8") as f:
+                for row in csv.DictReader(f):
+                    if safe_int(row.get("id")):
+                        session.merge(Agent(
+                            id=safe_int(row["id"]),
+                            agency_name=row.get("agency_name") or None,
+                        ))
+            session.commit()
+        
+        # Load properties
+        props_csv = data_dir / "properties.csv"
+        if props_csv.exists():
+            with open(props_csv, "r", encoding="utf-8") as f:
+                for row in csv.DictReader(f):
+                    if safe_int(row.get("id")):
+                        session.merge(Property(
+                            id=safe_int(row["id"]),
+                            category=row.get("category") or "unknown",
+                            subtype=safe_int(row.get("subtype")),
+                            buy_or_rent=row.get("buy_or_rent") or "sale",
+                            geography=row.get("geography") or None,
+                            latitude=safe_float(row.get("latitude")),
+                            longitude=safe_float(row.get("longitude")),
+                            sq_meters=safe_int(row.get("sq_meters")),
+                            floor_number=safe_int(row.get("floor_number")),
+                            rooms=safe_int(row.get("rooms")),
+                            bathrooms=safe_int(row.get("bathrooms")),
+                            ad_type=row.get("ad_type") or None,
+                            agent_id=safe_int(row.get("agent_id")),
+                            is_active=row.get("is_active") in ("1", "True", "true"),
+                        ))
+            session.commit()
+        
+        # Load snapshots
+        snaps_csv = data_dir / "snapshots.csv"
+        if snaps_csv.exists():
+            with open(snaps_csv, "r", encoding="utf-8") as f:
+                for row in csv.DictReader(f):
+                    if safe_int(row.get("id")) and safe_int(row.get("property_id")):
+                        session.merge(PropertySnapshot(
+                            id=safe_int(row["id"]),
+                            property_id=safe_int(row["property_id"]),
+                            collection_run_id=safe_int(row.get("collection_run_id")) or 1,
+                            price=safe_int(row.get("price")) or 0,
+                            price_per_sqm=safe_float(row.get("price_per_sqm")),
+                        ))
+            session.commit()
+        
+        count = session.query(Property).count()
+        if count > 0:
+            print(f"Loaded {count} properties from seed data")
+    
+    except Exception as e:
+        session.rollback()
+        raise
+    finally:
+        session.close()

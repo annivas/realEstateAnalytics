@@ -9,11 +9,10 @@ env/
 .venv/
 ENV/
 
-# Data (don't commit database to git)
-data/
-*.db
-*.sqlite
-*.sqlite3
+# Data - exclude database files, include CSVs for seeding
+data/*.db
+data/*.sqlite
+data/*.sqlite3
 
 # IDE
 .idea/
