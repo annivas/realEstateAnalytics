@@ -1,0 +1,75 @@
+name: Daily Data Collection
+
+on:
+  schedule:
+    # Run daily at 6 AM UTC (8 AM Athens time)
+    - cron: '0 6 * * *'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install httpx sqlalchemy pandas
+      
+      - name: Run data collection
+        run: |
+          python scripts/collect_ci.py
+        continue-on-error: true  # Don't fail if API has issues
+      
+      - name: Export data to CSV
+        run: |
+          python << 'EOF'
+          import sqlite3
+          import csv
+          import os
+          
+          db_path = "data/real_estate.db"
+          if not os.path.exists(db_path):
+              print("No database found, skipping export")
+              exit(0)
+          
+          conn = sqlite3.connect(db_path)
+          
+          # Export each table
+          for table in ["properties", "property_snapshots", "agents", "collection_runs"]:
+              cursor = conn.execute(f"SELECT * FROM {table}")
+              columns = [desc[0] for desc in cursor.description]
+              
+              filename = f"data/{table.replace('property_', '')}.csv"
+              with open(filename, "w", newline="") as f:
+                  writer = csv.writer(f)
+                  writer.writerow(columns)
+                  writer.writerows(cursor.fetchall())
+              
+              count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+              print(f"Exported {table}: {count} rows")
+          
+          conn.close()
+          EOF
+      
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add data/*.csv
+          
+          # Only commit if there are changes
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Daily data update: $(date +'%Y-%m-%d')"
+            git push
+          fi
