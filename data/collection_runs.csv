@@ -1,2 +1,2 @@
-id,started_at,completed_at,areas_collected,properties_found,new_properties,updated_properties,price_changes_detected,status,error_message
-1,2026-01-26 00:34:38.016422,2026-01-26 00:34:52.381426,1,0,0,0,0,failed,Expecting value: line 1 column 1 (char 0)
+id,started_at,completed_at,properties_found,new_properties,status
+1,2026-01-26 01:18:58,2026-01-26 01:18:59,0,0,completed
