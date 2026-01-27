@@ -113,6 +113,126 @@ def init_database(db_path):
     return conn
 
 
+def load_existing_data(conn, data_dir):
+    """Load existing data from CSV files into database."""
+    import csv
+    cursor = conn.cursor()
+    
+    # Load agents
+    agents_csv = data_dir / "agents.csv"
+    if agents_csv.exists():
+        print(f"Loading existing agents from {agents_csv}")
+        with open(agents_csv, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO agents (id, agency_name, first_seen, last_seen)
+                        VALUES (?, ?, ?, ?)
+                    """, (
+                        int(row["id"]) if row.get("id") else None,
+                        row.get("agency_name"),
+                        row.get("first_seen"),
+                        row.get("last_seen"),
+                    ))
+                except:
+                    pass
+        conn.commit()
+    
+    # Load properties
+    props_csv = data_dir / "properties.csv"
+    if props_csv.exists():
+        print(f"Loading existing properties from {props_csv}")
+        with open(props_csv, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO properties 
+                        (id, category, subtype, buy_or_rent, geography, latitude, longitude,
+                         sq_meters, floor_number, rooms, bathrooms, ad_type, agent_id,
+                         first_seen, last_seen, is_active)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        int(row["id"]) if row.get("id") else None,
+                        row.get("category"),
+                        int(row["subtype"]) if row.get("subtype") and row["subtype"] not in ('', 'None') else None,
+                        row.get("buy_or_rent"),
+                        row.get("geography"),
+                        float(row["latitude"]) if row.get("latitude") and row["latitude"] not in ('', 'None') else None,
+                        float(row["longitude"]) if row.get("longitude") and row["longitude"] not in ('', 'None') else None,
+                        int(row["sq_meters"]) if row.get("sq_meters") and row["sq_meters"] not in ('', 'None') else None,
+                        int(row["floor_number"]) if row.get("floor_number") and row["floor_number"] not in ('', 'None') else None,
+                        int(row["rooms"]) if row.get("rooms") and row["rooms"] not in ('', 'None') else None,
+                        int(row["bathrooms"]) if row.get("bathrooms") and row["bathrooms"] not in ('', 'None') else None,
+                        row.get("ad_type"),
+                        int(row["agent_id"]) if row.get("agent_id") and row["agent_id"] not in ('', 'None') else None,
+                        row.get("first_seen"),
+                        row.get("last_seen"),
+                        1 if row.get("is_active") in ('1', 'True', 'true', True) else 0,
+                    ))
+                except Exception as e:
+                    pass
+        conn.commit()
+    
+    # Load snapshots (critical for historical data!)
+    snaps_csv = data_dir / "snapshots.csv"
+    if snaps_csv.exists():
+        print(f"Loading existing snapshots from {snaps_csv}")
+        with open(snaps_csv, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO property_snapshots 
+                        (id, property_id, collection_run_id, price, price_reduced,
+                         price_pre_reduction, price_change_percentage, price_per_sqm, collected_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        int(row["id"]) if row.get("id") else None,
+                        int(row["property_id"]) if row.get("property_id") else None,
+                        int(row["collection_run_id"]) if row.get("collection_run_id") and row["collection_run_id"] not in ('', 'None') else 1,
+                        int(row["price"]) if row.get("price") and row["price"] not in ('', 'None') else 0,
+                        1 if row.get("price_reduced") in ('1', 'True', 'true', True) else 0,
+                        int(row["price_pre_reduction"]) if row.get("price_pre_reduction") and row["price_pre_reduction"] not in ('', 'None') else None,
+                        float(row["price_change_percentage"]) if row.get("price_change_percentage") and row["price_change_percentage"] not in ('', 'None') else None,
+                        float(row["price_per_sqm"]) if row.get("price_per_sqm") and row["price_per_sqm"] not in ('', 'None') else None,
+                        row.get("collected_at"),
+                    ))
+                except:
+                    pass
+        conn.commit()
+    
+    # Load collection runs
+    runs_csv = data_dir / "collection_runs.csv"
+    if runs_csv.exists():
+        print(f"Loading existing collection runs from {runs_csv}")
+        with open(runs_csv, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO collection_runs 
+                        (id, started_at, completed_at, properties_found, new_properties, status)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (
+                        int(row["id"]) if row.get("id") else None,
+                        row.get("started_at"),
+                        row.get("completed_at"),
+                        int(row["properties_found"]) if row.get("properties_found") and row["properties_found"] not in ('', 'None') else 0,
+                        int(row["new_properties"]) if row.get("new_properties") and row["new_properties"] not in ('', 'None') else 0,
+                        row.get("status"),
+                    ))
+                except:
+                    pass
+        conn.commit()
+    
+    # Report loaded counts
+    for table in ["agents", "properties", "property_snapshots", "collection_runs"]:
+        count = cursor.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        print(f"  {table}: {count} rows loaded")
+
+
 def collect_data():
     """Main collection function."""
     # Setup paths
@@ -127,6 +247,11 @@ def collect_data():
     
     conn = init_database(str(db_path))
     cursor = conn.cursor()
+    
+    # Load existing data from CSVs first (preserves historical data!)
+    print("\nLoading existing data...")
+    load_existing_data(conn, data_dir)
+    print("-" * 50)
     
     # Start collection run
     cursor.execute("INSERT INTO collection_runs (status) VALUES ('running')")
