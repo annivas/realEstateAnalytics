@@ -1045,6 +1045,183 @@ def render_market_intelligence_page():
         
         st.markdown("---")
         
+        # Market Demand Analysis
+        st.subheader("🔥 What The Market Wants")
+        st.markdown("Identify high-demand attributes by analyzing what sells fastest")
+        
+        # Summary cards
+        demand_summary = analyzer.get_market_demand_summary()
+        
+        if demand_summary:
+            col1, col2, col3, col4, col5 = st.columns(5)
+            
+            with col1:
+                if "best_size" in demand_summary:
+                    st.metric("Best Size", demand_summary["best_size"]["range"])
+                    st.caption(f"Avg {demand_summary['best_size']['avg_dom']:.0f} days")
+            
+            with col2:
+                if "best_floor" in demand_summary:
+                    st.metric("Best Floor", demand_summary["best_floor"]["level"])
+                    st.caption(f"Avg {demand_summary['best_floor']['avg_dom']:.0f} days")
+            
+            with col3:
+                if "best_price_range" in demand_summary:
+                    st.metric("Best Price Range", demand_summary["best_price_range"]["range"])
+                    st.caption(f"Avg {demand_summary['best_price_range']['avg_dom']:.0f} days")
+            
+            with col4:
+                if "best_rooms" in demand_summary:
+                    st.metric("Best Room Count", demand_summary["best_rooms"]["count"])
+                    st.caption(f"Avg {demand_summary['best_rooms']['avg_dom']:.0f} days")
+            
+            with col5:
+                if "top_areas" in demand_summary and demand_summary["top_areas"]:
+                    st.metric("Top Area", demand_summary["top_areas"][0]["geography"][:15])
+                    st.caption(f"Score: {demand_summary['top_areas'][0]['demand_score']}")
+        
+        # Detailed tabs
+        demand_tab1, demand_tab2, demand_tab3, demand_tab4, demand_tab5 = st.tabs([
+            "📍 By Area", "📐 By Size", "🏢 By Floor", "💰 By Price", "🚪 By Rooms"
+        ])
+        
+        with demand_tab1:
+            high_demand_areas = analyzer.get_high_demand_areas(min_listings=3)
+            if not high_demand_areas.empty:
+                import plotly.express as px
+                
+                fig = px.bar(
+                    high_demand_areas.head(15),
+                    x="geography",
+                    y="demand_score",
+                    color="demand_score",
+                    color_continuous_scale="RdYlGn",
+                    title="Demand Score by Area (Higher = More Demand)"
+                )
+                fig.update_layout(xaxis_tickangle=-45, showlegend=False)
+                st.plotly_chart(fig, use_container_width=True)
+                
+                display_df = high_demand_areas[["geography", "demand_score", "demand_level", 
+                                               "total_listings", "avg_dom", "reduction_rate"]].head(15)
+                display_df.columns = ["Area", "Demand Score", "Level", "Listings", "Avg DOM", "Reduction %"]
+                display_df["Avg DOM"] = display_df["Avg DOM"].apply(lambda x: f"{x:.0f} days" if pd.notna(x) else "N/A")
+                display_df["Reduction %"] = display_df["Reduction %"].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else "N/A")
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
+            else:
+                st.info("Not enough area data for demand analysis.")
+        
+        with demand_tab2:
+            size_demand = analyzer.get_demand_by_size_range()
+            if not size_demand.empty:
+                col1, col2 = st.columns([2, 1])
+                
+                with col1:
+                    import plotly.express as px
+                    fig = px.bar(
+                        size_demand,
+                        x="size_range",
+                        y="avg_dom",
+                        color="demand_indicator",
+                        title="Avg Days on Market by Size (Lower = Higher Demand)",
+                        color_discrete_map={"🔥 High": "#2ecc71", "📈 Good": "#f1c40f", "📉 Low": "#e74c3c"}
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                with col2:
+                    st.markdown("**Size Demand Analysis**")
+                    for _, row in size_demand.iterrows():
+                        st.write(f"{row['demand_indicator']} **{row['size_range']}**")
+                        st.caption(f"DOM: {row['avg_dom']:.0f}d | €{row['avg_price_sqm']:,.0f}/sqm")
+            else:
+                st.info("Not enough data for size analysis.")
+        
+        with demand_tab3:
+            floor_demand = analyzer.get_demand_by_floor()
+            if not floor_demand.empty:
+                col1, col2 = st.columns([2, 1])
+                
+                with col1:
+                    import plotly.express as px
+                    fig = px.bar(
+                        floor_demand,
+                        x="floor_category",
+                        y="avg_dom",
+                        color="demand_indicator",
+                        title="Avg Days on Market by Floor (Lower = Higher Demand)",
+                        color_discrete_map={"🔥 High": "#2ecc71", "📈 Good": "#f1c40f", "📉 Low": "#e74c3c"}
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                with col2:
+                    st.markdown("**Floor Demand Analysis**")
+                    for _, row in floor_demand.iterrows():
+                        st.write(f"{row['demand_indicator']} **{row['floor_category']}**")
+                        st.caption(f"DOM: {row['avg_dom']:.0f}d | €{row['avg_price_sqm']:,.0f}/sqm")
+            else:
+                st.info("Not enough data for floor analysis.")
+        
+        with demand_tab4:
+            price_demand = analyzer.get_demand_by_price_range()
+            if not price_demand.empty:
+                col1, col2 = st.columns([2, 1])
+                
+                with col1:
+                    import plotly.express as px
+                    fig = px.bar(
+                        price_demand,
+                        x="price_range",
+                        y="avg_dom",
+                        color="demand_indicator",
+                        title="Avg Days on Market by Price Range",
+                        color_discrete_map={"🔥 High": "#2ecc71", "📈 Good": "#f1c40f", "📉 Low": "#e74c3c"}
+                    )
+                    fig.update_layout(xaxis_tickangle=-45)
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                with col2:
+                    st.markdown("**Price Range Demand**")
+                    for _, row in price_demand.iterrows():
+                        st.write(f"{row['demand_indicator']} **{row['price_range']}**")
+                        st.caption(f"DOM: {row['avg_dom']:.0f}d | {row['listings']} listings")
+            else:
+                st.info("Not enough data for price analysis.")
+        
+        with demand_tab5:
+            rooms_demand = analyzer.get_demand_by_rooms()
+            if not rooms_demand.empty:
+                col1, col2 = st.columns([2, 1])
+                
+                with col1:
+                    import plotly.express as px
+                    fig = px.bar(
+                        rooms_demand,
+                        x="room_count",
+                        y="avg_dom",
+                        color="demand_indicator",
+                        title="Avg Days on Market by Room Count",
+                        color_discrete_map={"🔥 High": "#2ecc71", "📈 Good": "#f1c40f", "📉 Low": "#e74c3c"}
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                with col2:
+                    st.markdown("**Room Count Demand**")
+                    for _, row in rooms_demand.iterrows():
+                        st.write(f"{row['demand_indicator']} **{row['room_count']}**")
+                        st.caption(f"DOM: {row['avg_dom']:.0f}d | Avg €{row['avg_price']:,.0f}")
+            else:
+                st.info("Not enough data for room analysis.")
+        
+        st.markdown("""
+        **How to read this:**
+        - 🔥 **High Demand**: Sells in <40 days with <20% price reductions
+        - 📈 **Good Demand**: Sells in 40-60 days
+        - 📉 **Low Demand**: Takes >60 days to sell
+        
+        *Lower days on market (DOM) indicates higher buyer demand for that attribute.*
+        """)
+        
+        st.markdown("---")
+        
         # Price Benchmarks
         st.subheader("📊 Price Benchmarks by Area")
         st.markdown("Fair price ranges for each neighborhood")
