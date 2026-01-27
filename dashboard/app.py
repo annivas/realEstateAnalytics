@@ -119,7 +119,7 @@ def render_sidebar():
     # Navigation
     page = st.sidebar.radio(
         "Navigate",
-        ["Investor Dashboard", "Deal Finder", "Market Intelligence", "Property Insights", "Area Analysis", "Agent Insights", "Data Collection"],
+        ["Investor Dashboard", "Deal Finder", "Market History", "Market Intelligence", "Property Insights", "Area Analysis", "Agent Insights", "Data Collection"],
         label_visibility="collapsed",
     )
     
@@ -667,6 +667,245 @@ def render_price_trends_page():
         )
     else:
         st.info("Monthly summary not available yet.")
+
+
+def render_market_history_page():
+    """Render the market history page showing sold/removed listings."""
+    st.title("📜 Market History")
+    st.markdown("Track removed listings (likely sold) to understand actual market demand")
+    
+    with AdvancedInsightsAnalyzer() as analyzer:
+        # Summary stats
+        summary = analyzer.get_removed_listings_summary()
+        
+        if summary:
+            st.subheader("📊 Historical Summary")
+            
+            col1, col2, col3, col4, col5 = st.columns(5)
+            
+            with col1:
+                st.metric("Total Removed", f"{summary.get('total_removed', 0):,}")
+            with col2:
+                avg_price = summary.get('avg_price')
+                st.metric("Avg Sold Price", f"€{avg_price:,.0f}" if avg_price else "N/A")
+            with col3:
+                avg_sqm = summary.get('avg_price_sqm')
+                st.metric("Avg €/sqm", f"€{avg_sqm:,.0f}" if avg_sqm else "N/A")
+            with col4:
+                avg_dom = summary.get('avg_days_to_sell')
+                st.metric("Avg Days to Sell", f"{avg_dom:.0f}" if avg_dom else "N/A")
+            with col5:
+                reduction_pct = summary.get('had_price_reduction_pct')
+                st.metric("Had Price Cut", f"{reduction_pct:.0f}%" if reduction_pct else "N/A")
+            
+            st.markdown("---")
+        
+        # Tabs for different views
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "📋 Recent Removals", 
+            "📊 Sold vs Active",
+            "📍 By Area", 
+            "💰 By Price",
+            "📐 By Size"
+        ])
+        
+        # Tab 1: Recent removed listings
+        with tab1:
+            st.subheader("Recently Removed Listings")
+            st.markdown("Properties that left the market (likely sold or delisted)")
+            
+            removed_df = analyzer.get_removed_listings(limit=50)
+            
+            if not removed_df.empty:
+                display_df = removed_df[["id", "geography", "category", "sq_meters", "rooms",
+                                        "price", "price_per_sqm", "days_on_market", "agency_name"]].copy()
+                display_df["link"] = display_df["id"].apply(lambda x: f"https://www.spitogatos.gr/aggelia/11{x}")
+                display_df = display_df[["id", "link", "geography", "category", "sq_meters", "rooms",
+                                        "price", "price_per_sqm", "days_on_market", "agency_name"]]
+                display_df.columns = ["ID", "Link", "Area", "Type", "Size", "Rooms", "Price", "€/sqm", "Days Listed", "Agent"]
+                display_df["Price"] = display_df["Price"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
+                display_df["€/sqm"] = display_df["€/sqm"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
+                display_df["Agent"] = display_df["Agent"].apply(lambda x: str(x)[:15] + "..." if x and len(str(x)) > 15 else x)
+                
+                st.dataframe(
+                    display_df, 
+                    use_container_width=True, 
+                    hide_index=True,
+                    column_config={
+                        "Link": st.column_config.LinkColumn("Link", display_text="View")
+                    }
+                )
+            else:
+                st.info("No removed listings recorded yet. Historical data will accumulate over time.")
+        
+        # Tab 2: Sold vs Active comparison
+        with tab2:
+            st.subheader("Sold vs Active Comparison")
+            st.markdown("Compare attributes of properties that sold vs those still on market")
+            
+            comparison_df = analyzer.get_sold_vs_active_comparison()
+            
+            if not comparison_df.empty and len(comparison_df) == 2:
+                col1, col2 = st.columns(2)
+                
+                sold_row = comparison_df[comparison_df["status"] == "Sold/Removed"].iloc[0] if len(comparison_df[comparison_df["status"] == "Sold/Removed"]) > 0 else None
+                active_row = comparison_df[comparison_df["status"] == "Active"].iloc[0] if len(comparison_df[comparison_df["status"] == "Active"]) > 0 else None
+                
+                if sold_row is not None and active_row is not None:
+                    with col1:
+                        st.markdown("### ✅ What Sold")
+                        st.metric("Count", f"{int(sold_row['count']):,}")
+                        st.metric("Avg Price", f"€{sold_row['avg_price']:,.0f}" if pd.notna(sold_row['avg_price']) else "N/A")
+                        st.metric("Avg €/sqm", f"€{sold_row['avg_price_sqm']:,.0f}" if pd.notna(sold_row['avg_price_sqm']) else "N/A")
+                        st.metric("Avg Size", f"{sold_row['avg_size']:.0f} sqm" if pd.notna(sold_row['avg_size']) else "N/A")
+                        st.metric("Avg Rooms", f"{sold_row['avg_rooms']:.1f}" if pd.notna(sold_row['avg_rooms']) else "N/A")
+                        st.metric("Had Price Cut", f"{sold_row['reduction_rate']:.0f}%" if pd.notna(sold_row['reduction_rate']) else "N/A")
+                    
+                    with col2:
+                        st.markdown("### 🏠 Still Active")
+                        st.metric("Count", f"{int(active_row['count']):,}")
+                        st.metric("Avg Price", f"€{active_row['avg_price']:,.0f}" if pd.notna(active_row['avg_price']) else "N/A")
+                        st.metric("Avg €/sqm", f"€{active_row['avg_price_sqm']:,.0f}" if pd.notna(active_row['avg_price_sqm']) else "N/A")
+                        st.metric("Avg Size", f"{active_row['avg_size']:.0f} sqm" if pd.notna(active_row['avg_size']) else "N/A")
+                        st.metric("Avg Rooms", f"{active_row['avg_rooms']:.1f}" if pd.notna(active_row['avg_rooms']) else "N/A")
+                        st.metric("Has Price Cut", f"{active_row['reduction_rate']:.0f}%" if pd.notna(active_row['reduction_rate']) else "N/A")
+                    
+                    # Insights
+                    st.markdown("---")
+                    st.markdown("### 💡 Key Insights")
+                    
+                    insights = []
+                    if sold_row['avg_price'] and active_row['avg_price']:
+                        if sold_row['avg_price'] < active_row['avg_price']:
+                            diff_pct = (active_row['avg_price'] - sold_row['avg_price']) / active_row['avg_price'] * 100
+                            insights.append(f"📉 Sold properties were **{diff_pct:.0f}% cheaper** on average than current listings")
+                        else:
+                            diff_pct = (sold_row['avg_price'] - active_row['avg_price']) / active_row['avg_price'] * 100
+                            insights.append(f"📈 Sold properties were **{diff_pct:.0f}% more expensive** on average")
+                    
+                    if sold_row['avg_size'] and active_row['avg_size']:
+                        if sold_row['avg_size'] < active_row['avg_size']:
+                            insights.append(f"📐 Smaller properties sell faster (Sold avg: {sold_row['avg_size']:.0f}sqm vs Active avg: {active_row['avg_size']:.0f}sqm)")
+                        else:
+                            insights.append(f"📐 Larger properties are selling (Sold avg: {sold_row['avg_size']:.0f}sqm)")
+                    
+                    for insight in insights:
+                        st.write(insight)
+                else:
+                    st.dataframe(comparison_df, use_container_width=True, hide_index=True)
+            else:
+                st.info("Need both active and removed listings for comparison.")
+        
+        # Tab 3: Removed by Area
+        with tab3:
+            st.subheader("Sales by Area")
+            st.markdown("Which areas have the highest turnover (most sales)?")
+            
+            by_area = analyzer.get_removed_by_area(min_removed=1)
+            
+            if not by_area.empty:
+                import plotly.express as px
+                
+                fig = px.bar(
+                    by_area.head(15),
+                    x="geography",
+                    y="removed_count",
+                    color="avg_dom",
+                    color_continuous_scale="RdYlGn_r",
+                    title="Sales Count by Area (color = avg days to sell)"
+                )
+                fig.update_layout(xaxis_tickangle=-45)
+                st.plotly_chart(fig, use_container_width=True)
+                
+                display_df = by_area[["geography", "removed_count", "avg_sold_price", 
+                                     "avg_sold_price_sqm", "avg_dom", "reduction_rate"]].head(20)
+                display_df.columns = ["Area", "Sold", "Avg Price", "Avg €/sqm", "Avg Days", "Reduced %"]
+                display_df["Avg Price"] = display_df["Avg Price"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
+                display_df["Avg €/sqm"] = display_df["Avg €/sqm"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
+                display_df["Avg Days"] = display_df["Avg Days"].apply(lambda x: f"{x:.0f}" if pd.notna(x) else "N/A")
+                display_df["Reduced %"] = display_df["Reduced %"].apply(lambda x: f"{x:.0f}%" if pd.notna(x) else "N/A")
+                
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
+            else:
+                st.info("No area sales data available yet.")
+        
+        # Tab 4: Removed by Price Range
+        with tab4:
+            st.subheader("Sales by Price Range")
+            st.markdown("Which price points have the most buyer activity?")
+            
+            by_price = analyzer.get_removed_by_price_range()
+            
+            if not by_price.empty:
+                import plotly.express as px
+                
+                fig = px.bar(
+                    by_price,
+                    x="price_range",
+                    y="sold_count",
+                    color="avg_dom",
+                    color_continuous_scale="RdYlGn_r",
+                    title="Sales by Price Range (color = avg days to sell)"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("**Sales Volume**")
+                    for _, row in by_price.iterrows():
+                        pct = row['sold_count'] / by_price['sold_count'].sum() * 100
+                        st.write(f"• **{row['price_range']}**: {row['sold_count']} ({pct:.0f}%)")
+                
+                with col2:
+                    st.markdown("**Avg Time to Sell**")
+                    for _, row in by_price.iterrows():
+                        emoji = "🔥" if row['avg_dom'] and row['avg_dom'] < 40 else ("📈" if row['avg_dom'] and row['avg_dom'] < 60 else "🐌")
+                        dom_str = f"{row['avg_dom']:.0f} days" if pd.notna(row['avg_dom']) else "N/A"
+                        st.write(f"{emoji} **{row['price_range']}**: {dom_str}")
+            else:
+                st.info("No price range sales data available yet.")
+        
+        # Tab 5: Removed by Size
+        with tab5:
+            st.subheader("Sales by Size")
+            st.markdown("Which property sizes are buyers actually purchasing?")
+            
+            by_size = analyzer.get_removed_by_size()
+            
+            if not by_size.empty:
+                import plotly.express as px
+                
+                fig = px.bar(
+                    by_size,
+                    x="size_range",
+                    y="sold_count",
+                    color="avg_dom",
+                    color_continuous_scale="RdYlGn_r",
+                    title="Sales by Size (color = avg days to sell)"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
+                display_df = by_size[["size_range", "sold_count", "avg_price", "avg_price_sqm", "avg_dom"]]
+                display_df.columns = ["Size Range", "Sold", "Avg Price", "Avg €/sqm", "Avg Days"]
+                display_df["Avg Price"] = display_df["Avg Price"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
+                display_df["Avg €/sqm"] = display_df["Avg €/sqm"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
+                display_df["Avg Days"] = display_df["Avg Days"].apply(lambda x: f"{x:.0f}" if pd.notna(x) else "N/A")
+                
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
+                
+                # Most popular size
+                best_seller = by_size.loc[by_size["sold_count"].idxmax()]
+                st.success(f"**Most Popular Size**: {best_seller['size_range']} with {int(best_seller['sold_count'])} sales")
+            else:
+                st.info("No size sales data available yet.")
+        
+        st.markdown("---")
+        st.markdown("""
+        **Note:** Removed listings are properties that were in our database but are no longer available 
+        on the market. This typically means they were sold, but could also indicate delisting for other reasons.
+        Historical data improves as the system collects more snapshots over time.
+        """)
 
 
 def render_deal_finder_page():
@@ -1474,6 +1713,8 @@ def main():
             render_investor_dashboard()
         elif page == "Deal Finder":
             render_deal_finder_page()
+        elif page == "Market History":
+            render_market_history_page()
         elif page == "Market Intelligence":
             render_market_intelligence_page()
         elif page == "Property Insights":

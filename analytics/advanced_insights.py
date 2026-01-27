@@ -867,3 +867,224 @@ class AdvancedInsightsAnalyzer:
             }
         
         return summary
+    
+    # ==================== HISTORICAL / REMOVED LISTINGS ====================
+    
+    def get_removed_listings(self, limit: int = 50) -> pd.DataFrame:
+        """
+        Get properties that have been removed from the market (likely sold or delisted).
+        These are properties where is_active = 0.
+        """
+        query = """
+            SELECT 
+                p.id,
+                p.geography,
+                p.category,
+                p.sq_meters,
+                p.rooms,
+                p.floor_number,
+                ps.price,
+                ps.price_per_sqm,
+                ps.price_reduced,
+                p.first_seen,
+                p.last_seen,
+                CAST(julianday(p.last_seen) - julianday(p.first_seen) AS INTEGER) as days_on_market,
+                a.agency_name
+            FROM properties p
+            JOIN property_snapshots ps ON p.id = ps.property_id
+            LEFT JOIN agents a ON p.agent_id = a.id
+            WHERE p.is_active = 0
+            ORDER BY p.last_seen DESC
+            LIMIT :limit
+        """
+        
+        return pd.read_sql(query, self.session.bind, params={"limit": limit})
+    
+    def get_removed_listings_summary(self) -> Dict:
+        """Get summary statistics of removed/sold listings."""
+        query = """
+            SELECT 
+                COUNT(*) as total_removed,
+                AVG(ps.price) as avg_price,
+                AVG(ps.price_per_sqm) as avg_price_sqm,
+                AVG(p.sq_meters) as avg_size,
+                AVG(CAST(julianday(p.last_seen) - julianday(p.first_seen) AS INTEGER)) as avg_dom,
+                SUM(CASE WHEN ps.price_reduced = 1 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as had_reduction_pct
+            FROM properties p
+            JOIN property_snapshots ps ON p.id = ps.property_id
+            WHERE p.is_active = 0
+        """
+        
+        df = pd.read_sql(query, self.session.bind)
+        
+        if df.empty or df.iloc[0]["total_removed"] == 0:
+            return {}
+        
+        row = df.iloc[0]
+        return {
+            "total_removed": int(row["total_removed"]),
+            "avg_price": row["avg_price"],
+            "avg_price_sqm": row["avg_price_sqm"],
+            "avg_size": row["avg_size"],
+            "avg_days_to_sell": row["avg_dom"],
+            "had_price_reduction_pct": row["had_reduction_pct"],
+        }
+    
+    def get_removed_by_area(self, min_removed: int = 2) -> pd.DataFrame:
+        """Analyze removed listings by area - shows which areas have highest turnover."""
+        query = """
+            SELECT 
+                p.geography,
+                COUNT(*) as removed_count,
+                AVG(ps.price) as avg_sold_price,
+                AVG(ps.price_per_sqm) as avg_sold_price_sqm,
+                AVG(CAST(julianday(p.last_seen) - julianday(p.first_seen) AS INTEGER)) as avg_dom,
+                SUM(CASE WHEN ps.price_reduced = 1 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as reduction_rate
+            FROM properties p
+            JOIN property_snapshots ps ON p.id = ps.property_id
+            WHERE p.is_active = 0 AND p.geography IS NOT NULL
+            GROUP BY p.geography
+            HAVING COUNT(*) >= :min_removed
+            ORDER BY removed_count DESC
+        """
+        
+        return pd.read_sql(query, self.session.bind, params={"min_removed": min_removed})
+    
+    def get_removed_by_price_range(self) -> pd.DataFrame:
+        """Analyze which price ranges sell the most."""
+        query = """
+            SELECT 
+                CASE 
+                    WHEN ps.price < 100000 THEN 'Budget (<€100K)'
+                    WHEN ps.price < 200000 THEN 'Entry (€100-200K)'
+                    WHEN ps.price < 350000 THEN 'Mid-Range (€200-350K)'
+                    WHEN ps.price < 500000 THEN 'Upper (€350-500K)'
+                    WHEN ps.price < 750000 THEN 'Premium (€500-750K)'
+                    ELSE 'Luxury (€750K+)'
+                END as price_range,
+                COUNT(*) as sold_count,
+                AVG(CAST(julianday(p.last_seen) - julianday(p.first_seen) AS INTEGER)) as avg_dom,
+                AVG(p.sq_meters) as avg_size
+            FROM properties p
+            JOIN property_snapshots ps ON p.id = ps.property_id
+            WHERE p.is_active = 0 AND ps.price > 0
+            GROUP BY price_range
+            ORDER BY 
+                CASE price_range
+                    WHEN 'Budget (<€100K)' THEN 1
+                    WHEN 'Entry (€100-200K)' THEN 2
+                    WHEN 'Mid-Range (€200-350K)' THEN 3
+                    WHEN 'Upper (€350-500K)' THEN 4
+                    WHEN 'Premium (€500-750K)' THEN 5
+                    ELSE 6
+                END
+        """
+        
+        return pd.read_sql(query, self.session.bind)
+    
+    def get_removed_by_size(self) -> pd.DataFrame:
+        """Analyze which sizes sell the most."""
+        query = """
+            SELECT 
+                CASE 
+                    WHEN p.sq_meters < 50 THEN 'Studio/Small (<50 sqm)'
+                    WHEN p.sq_meters < 80 THEN '1-2 BR (50-80 sqm)'
+                    WHEN p.sq_meters < 120 THEN '2-3 BR (80-120 sqm)'
+                    WHEN p.sq_meters < 180 THEN 'Large (120-180 sqm)'
+                    ELSE 'Very Large (180+ sqm)'
+                END as size_range,
+                COUNT(*) as sold_count,
+                AVG(CAST(julianday(p.last_seen) - julianday(p.first_seen) AS INTEGER)) as avg_dom,
+                AVG(ps.price) as avg_price,
+                AVG(ps.price_per_sqm) as avg_price_sqm
+            FROM properties p
+            JOIN property_snapshots ps ON p.id = ps.property_id
+            WHERE p.is_active = 0 AND p.sq_meters > 0
+            GROUP BY size_range
+            ORDER BY 
+                CASE size_range
+                    WHEN 'Studio/Small (<50 sqm)' THEN 1
+                    WHEN '1-2 BR (50-80 sqm)' THEN 2
+                    WHEN '2-3 BR (80-120 sqm)' THEN 3
+                    WHEN 'Large (120-180 sqm)' THEN 4
+                    ELSE 5
+                END
+        """
+        
+        return pd.read_sql(query, self.session.bind)
+    
+    def get_sold_vs_active_comparison(self) -> pd.DataFrame:
+        """Compare attributes of sold (removed) properties vs still active ones."""
+        query = """
+            SELECT 
+                CASE WHEN p.is_active = 1 THEN 'Active' ELSE 'Sold/Removed' END as status,
+                COUNT(*) as count,
+                AVG(ps.price) as avg_price,
+                AVG(ps.price_per_sqm) as avg_price_sqm,
+                AVG(p.sq_meters) as avg_size,
+                AVG(p.rooms) as avg_rooms,
+                AVG(p.floor_number) as avg_floor,
+                SUM(CASE WHEN ps.price_reduced = 1 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as reduction_rate
+            FROM properties p
+            JOIN property_snapshots ps ON p.id = ps.property_id
+            GROUP BY p.is_active
+        """
+        
+        return pd.read_sql(query, self.session.bind)
+    
+    def get_removal_timeline(self) -> pd.DataFrame:
+        """Get timeline of when properties were removed (sold)."""
+        query = """
+            SELECT 
+                DATE(p.last_seen) as removal_date,
+                COUNT(*) as removed_count,
+                AVG(ps.price) as avg_price,
+                AVG(CAST(julianday(p.last_seen) - julianday(p.first_seen) AS INTEGER)) as avg_dom
+            FROM properties p
+            JOIN property_snapshots ps ON p.id = ps.property_id
+            WHERE p.is_active = 0 AND p.last_seen IS NOT NULL
+            GROUP BY DATE(p.last_seen)
+            ORDER BY removal_date DESC
+            LIMIT 30
+        """
+        
+        return pd.read_sql(query, self.session.bind)
+    
+    def get_what_actually_sold(self) -> Dict:
+        """
+        Comprehensive analysis of what actually sold - the true demand profile.
+        Returns insights on sold property attributes.
+        """
+        sold_summary = self.get_removed_listings_summary()
+        
+        if not sold_summary:
+            return {"error": "No sold/removed listings data available"}
+        
+        result = {"summary": sold_summary}
+        
+        # Best selling areas
+        by_area = self.get_removed_by_area(min_removed=1)
+        if not by_area.empty:
+            result["top_selling_areas"] = by_area.head(5).to_dict("records")
+        
+        # Best selling price ranges
+        by_price = self.get_removed_by_price_range()
+        if not by_price.empty:
+            best_price = by_price.loc[by_price["sold_count"].idxmax()]
+            result["best_selling_price_range"] = {
+                "range": best_price["price_range"],
+                "sold_count": int(best_price["sold_count"]),
+                "avg_dom": best_price["avg_dom"],
+            }
+        
+        # Best selling sizes
+        by_size = self.get_removed_by_size()
+        if not by_size.empty:
+            best_size = by_size.loc[by_size["sold_count"].idxmax()]
+            result["best_selling_size"] = {
+                "range": best_size["size_range"],
+                "sold_count": int(best_size["sold_count"]),
+                "avg_dom": best_size["avg_dom"],
+            }
+        
+        return result
