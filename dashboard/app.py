@@ -196,14 +196,24 @@ def render_investor_dashboard():
                 st.markdown("---")
                 
                 # Listings table
-                display_df = new_listings[["geography", "category", "sq_meters", "rooms", 
+                display_df = new_listings[["id", "geography", "category", "sq_meters", "rooms", 
                                           "price", "price_per_sqm", "hours_listed", "agency_name"]].copy()
-                display_df.columns = ["Area", "Type", "Size", "Rooms", "Price", "€/sqm", "Hours Listed", "Agent"]
+                display_df["link"] = display_df["id"].apply(lambda x: f"https://www.spitogatos.gr/aggelia/{x}")
+                display_df = display_df[["id", "link", "geography", "category", "sq_meters", "rooms", 
+                                        "price", "price_per_sqm", "hours_listed", "agency_name"]]
+                display_df.columns = ["ID", "Link", "Area", "Type", "Size", "Rooms", "Price", "€/sqm", "Hours Listed", "Agent"]
                 display_df["Price"] = display_df["Price"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
                 display_df["€/sqm"] = display_df["€/sqm"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
                 display_df["Agent"] = display_df["Agent"].apply(lambda x: str(x)[:15] + "..." if x and len(str(x)) > 15 else x)
                 
-                st.dataframe(display_df, use_container_width=True, hide_index=True)
+                st.dataframe(
+                    display_df, 
+                    use_container_width=True, 
+                    hide_index=True,
+                    column_config={
+                        "Link": st.column_config.LinkColumn("Link", display_text="View")
+                    }
+                )
                 
                 # New listings by area
                 st.markdown("**Hot Areas (Most New Listings)**")
@@ -372,10 +382,14 @@ def render_investor_dashboard():
                 st.markdown("---")
                 
                 # Distressed properties table
-                display_df = distressed_df[["geography", "category", "sq_meters", "price", 
+                display_df = distressed_df[["id", "geography", "category", "sq_meters", "price", 
                                            "price_per_sqm", "days_on_market", "below_avg_pct",
                                            "distress_score", "distress_level"]].copy()
-                display_df.columns = ["Area", "Type", "Size", "Price", "€/sqm", "Days", "Below Avg %", "Score", "Level"]
+                display_df["link"] = display_df["id"].apply(lambda x: f"https://www.spitogatos.gr/aggelia/{x}")
+                display_df = display_df[["id", "link", "geography", "category", "sq_meters", "price", 
+                                        "price_per_sqm", "days_on_market", "below_avg_pct",
+                                        "distress_score", "distress_level"]]
+                display_df.columns = ["ID", "Link", "Area", "Type", "Size", "Price", "€/sqm", "Days", "Below Avg %", "Score", "Level"]
                 display_df["Price"] = display_df["Price"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
                 display_df["€/sqm"] = display_df["€/sqm"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
                 display_df["Below Avg %"] = display_df["Below Avg %"].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else "N/A")
@@ -385,6 +399,7 @@ def render_investor_dashboard():
                     use_container_width=True, 
                     hide_index=True,
                     column_config={
+                        "Link": st.column_config.LinkColumn("Link", display_text="View"),
                         "Score": st.column_config.ProgressColumn(
                             "Score",
                             min_value=0,
@@ -720,10 +735,13 @@ def render_deal_finder_page():
         """)
         
         if not motivated_sellers.empty:
-            display_df = motivated_sellers[["geography", "category", "sq_meters", "price", 
+            display_df = motivated_sellers[["id", "geography", "category", "sq_meters", "price", 
                                            "price_per_sqm", "days_on_market", "motivated_score", 
                                            "motivation_level"]].copy()
-            display_df.columns = ["Area", "Type", "Size", "Price", "€/sqm", "Days Listed", "Score", "Level"]
+            display_df["link"] = display_df["id"].apply(lambda x: f"https://www.spitogatos.gr/aggelia/{x}")
+            display_df = display_df[["id", "link", "geography", "category", "sq_meters", "price", 
+                                    "price_per_sqm", "days_on_market", "motivated_score", "motivation_level"]]
+            display_df.columns = ["ID", "Link", "Area", "Type", "Size", "Price", "€/sqm", "Days Listed", "Score", "Level"]
             display_df["Price"] = display_df["Price"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
             display_df["€/sqm"] = display_df["€/sqm"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
             
@@ -733,6 +751,7 @@ def render_deal_finder_page():
                 use_container_width=True,
                 hide_index=True,
                 column_config={
+                    "Link": st.column_config.LinkColumn("Link", display_text="View"),
                     "Score": st.column_config.ProgressColumn(
                         "Score",
                         min_value=0,
@@ -1051,14 +1070,24 @@ def render_market_intelligence_page():
         underpriced_df = analyzer.get_underpriced_properties(threshold_pct=15, limit=20)
         
         if not underpriced_df.empty:
-            display_df = underpriced_df[["geography", "category", "sq_meters", "price", 
-                                        "price_per_sqm", "area_avg_price_sqm", "discount_pct"]]
-            display_df.columns = ["Area", "Type", "Size", "Price", "€/sqm", "Area Avg", "Discount %"]
+            display_df = underpriced_df[["id", "geography", "category", "sq_meters", "price", 
+                                        "price_per_sqm", "area_avg_price_sqm", "discount_pct"]].copy()
+            display_df["link"] = display_df["id"].apply(lambda x: f"https://www.spitogatos.gr/aggelia/{x}")
+            display_df = display_df[["id", "link", "geography", "category", "sq_meters", "price", 
+                                    "price_per_sqm", "area_avg_price_sqm", "discount_pct"]]
+            display_df.columns = ["ID", "Link", "Area", "Type", "Size", "Price", "€/sqm", "Area Avg", "Discount %"]
             display_df["Price"] = display_df["Price"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
             display_df["€/sqm"] = display_df["€/sqm"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
             display_df["Area Avg"] = display_df["Area Avg"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
             display_df["Discount %"] = display_df["Discount %"].apply(lambda x: f"-{x:.1f}%" if pd.notna(x) else "N/A")
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            st.dataframe(
+                display_df, 
+                use_container_width=True, 
+                hide_index=True,
+                column_config={
+                    "Link": st.column_config.LinkColumn("Link", display_text="View")
+                }
+            )
         else:
             st.info("No underpriced properties found.")
         
@@ -1233,13 +1262,23 @@ def render_property_insights_page():
         stale_df = analyzer.get_stale_listings(min_days=60, limit=20)
         
         if not stale_df.empty:
-            display_df = stale_df[["geography", "category", "sq_meters", "price", 
-                                  "price_per_sqm", "days_on_market", "agency_name"]]
-            display_df.columns = ["Area", "Type", "Size", "Price", "€/sqm", "Days Listed", "Agent"]
+            display_df = stale_df[["id", "geography", "category", "sq_meters", "price", 
+                                  "price_per_sqm", "days_on_market", "agency_name"]].copy()
+            display_df["link"] = display_df["id"].apply(lambda x: f"https://www.spitogatos.gr/aggelia/{x}")
+            display_df = display_df[["id", "link", "geography", "category", "sq_meters", "price", 
+                                    "price_per_sqm", "days_on_market", "agency_name"]]
+            display_df.columns = ["ID", "Link", "Area", "Type", "Size", "Price", "€/sqm", "Days Listed", "Agent"]
             display_df["Price"] = display_df["Price"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
             display_df["€/sqm"] = display_df["€/sqm"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
             display_df["Agent"] = display_df["Agent"].apply(lambda x: x[:20] + "..." if x and len(str(x)) > 20 else x)
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            st.dataframe(
+                display_df, 
+                use_container_width=True, 
+                hide_index=True,
+                column_config={
+                    "Link": st.column_config.LinkColumn("Link", display_text="View")
+                }
+            )
         else:
             st.info("No stale listings found (all properties listed < 60 days).")
 
