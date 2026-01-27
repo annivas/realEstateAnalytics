@@ -198,7 +198,7 @@ def render_investor_dashboard():
                 # Listings table
                 display_df = new_listings[["id", "geography", "category", "sq_meters", "rooms", 
                                           "price", "price_per_sqm", "hours_listed", "agency_name"]].copy()
-                display_df["link"] = display_df["id"].apply(lambda x: f"https://www.spitogatos.gr/aggelia/{x}")
+                display_df["link"] = display_df["id"].apply(lambda x: f"https://www.spitogatos.gr/aggelia/11{x}")
                 display_df = display_df[["id", "link", "geography", "category", "sq_meters", "rooms", 
                                         "price", "price_per_sqm", "hours_listed", "agency_name"]]
                 display_df.columns = ["ID", "Link", "Area", "Type", "Size", "Rooms", "Price", "€/sqm", "Hours Listed", "Agent"]
@@ -385,7 +385,7 @@ def render_investor_dashboard():
                 display_df = distressed_df[["id", "geography", "category", "sq_meters", "price", 
                                            "price_per_sqm", "days_on_market", "below_avg_pct",
                                            "distress_score", "distress_level"]].copy()
-                display_df["link"] = display_df["id"].apply(lambda x: f"https://www.spitogatos.gr/aggelia/{x}")
+                display_df["link"] = display_df["id"].apply(lambda x: f"https://www.spitogatos.gr/aggelia/11{x}")
                 display_df = display_df[["id", "link", "geography", "category", "sq_meters", "price", 
                                         "price_per_sqm", "days_on_market", "below_avg_pct",
                                         "distress_score", "distress_level"]]
@@ -738,7 +738,7 @@ def render_deal_finder_page():
             display_df = motivated_sellers[["id", "geography", "category", "sq_meters", "price", 
                                            "price_per_sqm", "days_on_market", "motivated_score", 
                                            "motivation_level"]].copy()
-            display_df["link"] = display_df["id"].apply(lambda x: f"https://www.spitogatos.gr/aggelia/{x}")
+            display_df["link"] = display_df["id"].apply(lambda x: f"https://www.spitogatos.gr/aggelia/11{x}")
             display_df = display_df[["id", "link", "geography", "category", "sq_meters", "price", 
                                     "price_per_sqm", "days_on_market", "motivated_score", "motivation_level"]]
             display_df.columns = ["ID", "Link", "Area", "Type", "Size", "Price", "€/sqm", "Days Listed", "Score", "Level"]
@@ -1249,7 +1249,7 @@ def render_market_intelligence_page():
         if not underpriced_df.empty:
             display_df = underpriced_df[["id", "geography", "category", "sq_meters", "price", 
                                         "price_per_sqm", "area_avg_price_sqm", "discount_pct"]].copy()
-            display_df["link"] = display_df["id"].apply(lambda x: f"https://www.spitogatos.gr/aggelia/{x}")
+            display_df["link"] = display_df["id"].apply(lambda x: f"https://www.spitogatos.gr/aggelia/11{x}")
             display_df = display_df[["id", "link", "geography", "category", "sq_meters", "price", 
                                     "price_per_sqm", "area_avg_price_sqm", "discount_pct"]]
             display_df.columns = ["ID", "Link", "Area", "Type", "Size", "Price", "€/sqm", "Area Avg", "Discount %"]
@@ -1441,7 +1441,7 @@ def render_property_insights_page():
         if not stale_df.empty:
             display_df = stale_df[["id", "geography", "category", "sq_meters", "price", 
                                   "price_per_sqm", "days_on_market", "agency_name"]].copy()
-            display_df["link"] = display_df["id"].apply(lambda x: f"https://www.spitogatos.gr/aggelia/{x}")
+            display_df["link"] = display_df["id"].apply(lambda x: f"https://www.spitogatos.gr/aggelia/11{x}")
             display_df = display_df[["id", "link", "geography", "category", "sq_meters", "price", 
                                     "price_per_sqm", "days_on_market", "agency_name"]]
             display_df.columns = ["ID", "Link", "Area", "Type", "Size", "Price", "€/sqm", "Days Listed", "Agent"]
