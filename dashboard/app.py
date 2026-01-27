@@ -22,6 +22,7 @@ from analytics.inventory import InventoryAnalyzer
 from analytics.price_reductions import PriceReductionAnalyzer
 from analytics.area_analysis import AreaAnalyzer
 from analytics.agent_analysis import AgentAnalyzer
+from analytics.advanced_insights import AdvancedInsightsAnalyzer
 from config import MONITORED_AREAS
 
 from dashboard.components.metrics import render_metric_cards, render_stat_box
@@ -117,7 +118,7 @@ def render_sidebar():
     # Navigation
     page = st.sidebar.radio(
         "Navigate",
-        ["Overview", "Price Trends", "Deal Finder", "Area Analysis", "Agent Insights", "Data Collection"],
+        ["Overview", "Market Intelligence", "Deal Finder", "Property Insights", "Area Analysis", "Agent Insights", "Data Collection"],
         label_visibility="collapsed",
     )
     
@@ -326,7 +327,7 @@ def render_price_trends_page():
 def render_deal_finder_page():
     """Render the deal finder page."""
     st.title("Deal Finder")
-    st.markdown("Find properties with price reductions and potential bargains")
+    st.markdown("Find properties with price reductions, motivated sellers, and potential bargains")
     
     # Filters
     col1, col2, col3 = st.columns(3)
@@ -355,6 +356,10 @@ def render_deal_finder_page():
             min_days_on_market=30,
         )
     
+    # Get motivated seller scores
+    with AdvancedInsightsAnalyzer() as analyzer:
+        motivated_sellers = analyzer.get_motivated_seller_scores(limit=max_results)
+    
     # Stats row
     col1, col2, col3, col4 = st.columns(4)
     
@@ -368,18 +373,66 @@ def render_deal_finder_page():
         st.metric("Max Reduction", f"{stats.get('max_reduction_pct', 0):.1f}%")
     
     with col4:
-        st.metric("Total Value Reduced", f"EUR {stats.get('total_value_reduced', 0):,.0f}")
+        st.metric("Total Value Reduced", f"€{stats.get('total_value_reduced', 0):,.0f}")
     
     st.markdown("---")
     
     # Tabs for different deal views
-    tab1, tab2 = st.tabs(["Recent Price Drops", "Undervalued Properties"])
+    tab1, tab2, tab3 = st.tabs(["🔥 Motivated Sellers", "📉 Price Drops", "💎 Undervalued"])
     
     with tab1:
+        st.subheader("Motivated Seller Score")
+        st.markdown("""
+        Properties ranked by seller motivation based on:
+        - **Days on market** (40%) - longer = more motivated
+        - **Price reductions** (35%) - reduced prices indicate motivation
+        - **Below area average** (25%) - already priced to sell
+        """)
+        
+        if not motivated_sellers.empty:
+            display_df = motivated_sellers[["geography", "category", "sq_meters", "price", 
+                                           "price_per_sqm", "days_on_market", "motivated_score", 
+                                           "motivation_level"]].copy()
+            display_df.columns = ["Area", "Type", "Size", "Price", "€/sqm", "Days Listed", "Score", "Level"]
+            display_df["Price"] = display_df["Price"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
+            display_df["€/sqm"] = display_df["€/sqm"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
+            
+            # Color code by motivation level
+            st.dataframe(
+                display_df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Score": st.column_config.ProgressColumn(
+                        "Score",
+                        min_value=0,
+                        max_value=10,
+                        format="%.1f"
+                    ),
+                    "Level": st.column_config.TextColumn("Level")
+                }
+            )
+            
+            # Summary stats
+            st.markdown("---")
+            col1, col2, col3, col4 = st.columns(4)
+            levels = motivated_sellers["motivation_level"].value_counts()
+            with col1:
+                st.metric("Very High", levels.get("Very High", 0))
+            with col2:
+                st.metric("High", levels.get("High", 0))
+            with col3:
+                st.metric("Medium", levels.get("Medium", 0))
+            with col4:
+                st.metric("Low", levels.get("Low", 0))
+        else:
+            st.info("No data available for motivated seller analysis.")
+    
+    with tab2:
         st.subheader(f"Properties with Price Reductions (Last {days} Days)")
         render_deals_table(recent_drops)
     
-    with tab2:
+    with tab3:
         st.subheader("Potential Deals - Below Market Value")
         st.markdown("Properties in the bottom 25% for price/sqm that have been listed for 30+ days")
         render_deals_table(deals)
@@ -608,6 +661,259 @@ def render_data_collection_page():
         """)
 
 
+def render_market_intelligence_page():
+    """Render the market intelligence page with advanced insights."""
+    st.title("Market Intelligence")
+    st.markdown("Advanced market analysis and investment insights")
+    
+    with AdvancedInsightsAnalyzer() as analyzer:
+        # Investment Scores
+        st.subheader("🎯 Investment Area Scores")
+        st.markdown("Areas ranked by investment potential (value + liquidity + activity)")
+        
+        investment_df = analyzer.get_investment_area_scores(min_listings=3)
+        
+        if not investment_df.empty:
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                # Show top investment areas
+                display_df = investment_df[["geography", "investment_score", "investment_rating", 
+                                           "listing_count", "avg_price_sqm", "avg_dom"]].head(15)
+                display_df.columns = ["Area", "Score", "Rating", "Listings", "Avg €/sqm", "Avg DOM"]
+                display_df["Avg €/sqm"] = display_df["Avg €/sqm"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
+                display_df["Avg DOM"] = display_df["Avg DOM"].apply(lambda x: f"{x:.0f} days" if pd.notna(x) else "N/A")
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
+            
+            with col2:
+                st.markdown("**Rating Breakdown**")
+                rating_counts = investment_df["investment_rating"].value_counts()
+                for rating, count in rating_counts.items():
+                    emoji = {"Excellent": "🌟", "Good": "✅", "Fair": "⚠️", "Avoid": "❌"}.get(rating, "")
+                    st.write(f"{emoji} {rating}: {count} areas")
+        else:
+            st.info("Not enough data for investment analysis.")
+        
+        st.markdown("---")
+        
+        # Price Benchmarks
+        st.subheader("📊 Price Benchmarks by Area")
+        st.markdown("Fair price ranges for each neighborhood")
+        
+        benchmarks_df = analyzer.get_price_benchmarks_by_area(min_listings=3)
+        
+        if not benchmarks_df.empty:
+            display_df = benchmarks_df[["geography", "listing_count", "avg_price_sqm", 
+                                       "fair_price_low", "fair_price_high"]].head(20)
+            display_df.columns = ["Area", "Listings", "Avg €/sqm", "Fair Low", "Fair High"]
+            for col in ["Avg €/sqm", "Fair Low", "Fair High"]:
+                display_df[col] = display_df[col].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("Not enough data for price benchmarks.")
+        
+        st.markdown("---")
+        
+        # Underpriced Properties
+        st.subheader("💰 Underpriced Properties")
+        st.markdown("Properties significantly below area average")
+        
+        underpriced_df = analyzer.get_underpriced_properties(threshold_pct=15, limit=20)
+        
+        if not underpriced_df.empty:
+            display_df = underpriced_df[["geography", "category", "sq_meters", "price", 
+                                        "price_per_sqm", "area_avg_price_sqm", "discount_pct"]]
+            display_df.columns = ["Area", "Type", "Size", "Price", "€/sqm", "Area Avg", "Discount %"]
+            display_df["Price"] = display_df["Price"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
+            display_df["€/sqm"] = display_df["€/sqm"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
+            display_df["Area Avg"] = display_df["Area Avg"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
+            display_df["Discount %"] = display_df["Discount %"].apply(lambda x: f"-{x:.1f}%" if pd.notna(x) else "N/A")
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("No underpriced properties found.")
+        
+        st.markdown("---")
+        
+        # Market Speed by Area
+        st.subheader("⚡ Market Speed by Area")
+        st.markdown("How fast properties sell in each area")
+        
+        dom_df = analyzer.get_dom_by_area(min_listings=3)
+        
+        if not dom_df.empty:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**Fastest Markets (Hot)**")
+                fast = dom_df[dom_df["market_speed"] == "Hot"].head(10)
+                if not fast.empty:
+                    for _, row in fast.iterrows():
+                        st.write(f"🔥 {row['geography']}: {row['avg_days_on_market']:.0f} days avg")
+                else:
+                    st.write("No hot markets found")
+            
+            with col2:
+                st.markdown("**Slowest Markets**")
+                slow = dom_df[dom_df["market_speed"].isin(["Slow", "Very Slow"])].head(10)
+                if not slow.empty:
+                    for _, row in slow.iterrows():
+                        st.write(f"🐌 {row['geography']}: {row['avg_days_on_market']:.0f} days avg")
+                else:
+                    st.write("No slow markets found")
+        else:
+            st.info("Not enough data for market speed analysis.")
+        
+        st.markdown("---")
+        
+        # Listing Type Analysis
+        st.subheader("📋 Listing Type Analysis")
+        st.markdown("VIP vs Featured vs Standard listings comparison")
+        
+        listing_df = analyzer.get_listing_type_analysis()
+        
+        if not listing_df.empty:
+            col1, col2, col3 = st.columns(3)
+            
+            for i, (_, row) in enumerate(listing_df.iterrows()):
+                col = [col1, col2, col3][i % 3]
+                with col:
+                    lt = row["listing_type"].upper() if row["listing_type"] else "STANDARD"
+                    st.metric(lt, f"{row['listing_count']:,} listings")
+                    st.caption(f"Avg Price: €{row['avg_price']:,.0f}")
+                    st.caption(f"Avg €/sqm: €{row['avg_price_sqm']:,.0f}" if pd.notna(row['avg_price_sqm']) else "")
+                    st.caption(f"Reduction Rate: {row['reduction_rate']:.1f}%")
+        else:
+            st.info("No listing type data available.")
+
+
+def render_property_insights_page():
+    """Render property insights page with floor and size analysis."""
+    st.title("Property Insights")
+    st.markdown("Detailed analysis of property characteristics and pricing")
+    
+    with AdvancedInsightsAnalyzer() as analyzer:
+        # Floor Premium Analysis
+        st.subheader("🏢 Floor Premium Analysis")
+        st.markdown("How does floor level affect price?")
+        
+        floor_df = analyzer.get_floor_premium_summary()
+        
+        if not floor_df.empty:
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                # Bar chart
+                import plotly.express as px
+                fig = px.bar(
+                    floor_df, 
+                    x="floor_category", 
+                    y="avg_price_sqm",
+                    title="Average Price per sqm by Floor Level",
+                    labels={"floor_category": "Floor Level", "avg_price_sqm": "Avg €/sqm"}
+                )
+                fig.update_layout(showlegend=False)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with col2:
+                st.markdown("**Statistics**")
+                for _, row in floor_df.iterrows():
+                    st.write(f"**{row['floor_category']}**")
+                    st.caption(f"{row['listing_count']} listings, €{row['avg_price_sqm']:,.0f}/sqm")
+        else:
+            st.info("No floor data available.")
+        
+        st.markdown("---")
+        
+        # Size Efficiency Analysis
+        st.subheader("📐 Size vs Price Analysis")
+        st.markdown("How does property size affect price per sqm?")
+        
+        size_df = analyzer.get_size_efficiency_analysis()
+        
+        if not size_df.empty:
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                import plotly.express as px
+                fig = px.bar(
+                    size_df,
+                    x="size_category",
+                    y="avg_price_sqm",
+                    title="Price per sqm by Property Size",
+                    labels={"size_category": "Size Category", "avg_price_sqm": "Avg €/sqm"}
+                )
+                fig.update_layout(showlegend=False)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with col2:
+                st.markdown("**Key Finding**")
+                if len(size_df) >= 2:
+                    smallest = size_df.iloc[0]
+                    largest = size_df.iloc[-1]
+                    if smallest["avg_price_sqm"] > largest["avg_price_sqm"]:
+                        premium = ((smallest["avg_price_sqm"] / largest["avg_price_sqm"]) - 1) * 100
+                        st.info(f"Smaller properties have a **{premium:.0f}% premium** per sqm compared to larger ones.")
+                    else:
+                        st.info("Larger properties have similar or higher price per sqm.")
+                
+                st.markdown("**By Size**")
+                for _, row in size_df.iterrows():
+                    st.write(f"**{row['size_category']}**")
+                    st.caption(f"{row['listing_count']} listings, €{row['avg_price_sqm']:,.0f}/sqm")
+        else:
+            st.info("No size data available.")
+        
+        st.markdown("---")
+        
+        # Detailed Floor Analysis
+        st.subheader("📈 Detailed Floor Premium")
+        
+        floor_detail = analyzer.get_floor_premium_analysis()
+        
+        if not floor_detail.empty and len(floor_detail) > 1:
+            import plotly.express as px
+            fig = px.scatter(
+                floor_detail,
+                x="floor_number",
+                y="avg_price_sqm",
+                size="listing_count",
+                title="Price per sqm by Floor Number",
+                labels={"floor_number": "Floor", "avg_price_sqm": "Avg €/sqm", "listing_count": "Listings"},
+                hover_data=["listing_count", "premium_vs_ground_pct"]
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Show premium percentages
+            if "premium_vs_ground_pct" in floor_detail.columns:
+                st.markdown("**Floor Premiums vs Ground Floor**")
+                premiums = floor_detail[floor_detail["floor_number"] > 0].sort_values("floor_number")
+                for _, row in premiums.head(10).iterrows():
+                    premium = row["premium_vs_ground_pct"]
+                    arrow = "📈" if premium > 0 else "📉" if premium < 0 else "➡️"
+                    st.write(f"Floor {int(row['floor_number'])}: {arrow} {premium:+.1f}%")
+        else:
+            st.info("Not enough floor data for detailed analysis.")
+        
+        st.markdown("---")
+        
+        # Stale Listings
+        st.subheader("⏰ Stale Listings (60+ Days)")
+        st.markdown("Properties on market for a long time - potential negotiation opportunities")
+        
+        stale_df = analyzer.get_stale_listings(min_days=60, limit=20)
+        
+        if not stale_df.empty:
+            display_df = stale_df[["geography", "category", "sq_meters", "price", 
+                                  "price_per_sqm", "days_on_market", "agency_name"]]
+            display_df.columns = ["Area", "Type", "Size", "Price", "€/sqm", "Days Listed", "Agent"]
+            display_df["Price"] = display_df["Price"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
+            display_df["€/sqm"] = display_df["€/sqm"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
+            display_df["Agent"] = display_df["Agent"].apply(lambda x: x[:20] + "..." if x and len(str(x)) > 20 else x)
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("No stale listings found (all properties listed < 60 days).")
+
+
 def main():
     """Main application entry point."""
     try:
@@ -620,10 +926,12 @@ def main():
         # Render selected page
         if page == "Overview":
             render_overview_page()
-        elif page == "Price Trends":
-            render_price_trends_page()
+        elif page == "Market Intelligence":
+            render_market_intelligence_page()
         elif page == "Deal Finder":
             render_deal_finder_page()
+        elif page == "Property Insights":
+            render_property_insights_page()
         elif page == "Area Analysis":
             render_area_analysis_page()
         elif page == "Agent Insights":
