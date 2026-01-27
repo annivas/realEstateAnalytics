@@ -23,6 +23,7 @@ from analytics.price_reductions import PriceReductionAnalyzer
 from analytics.area_analysis import AreaAnalyzer
 from analytics.agent_analysis import AgentAnalyzer
 from analytics.advanced_insights import AdvancedInsightsAnalyzer
+from analytics.investor_tools import InvestorAnalyzer
 from config import MONITORED_AREAS
 
 from dashboard.components.metrics import render_metric_cards, render_stat_box
@@ -118,7 +119,7 @@ def render_sidebar():
     # Navigation
     page = st.sidebar.radio(
         "Navigate",
-        ["Overview", "Market Intelligence", "Deal Finder", "Property Insights", "Area Analysis", "Agent Insights", "Data Collection"],
+        ["Investor Dashboard", "Deal Finder", "Market Intelligence", "Property Insights", "Area Analysis", "Agent Insights", "Data Collection"],
         label_visibility="collapsed",
     )
     
@@ -130,6 +131,335 @@ def render_sidebar():
         st.sidebar.text(f"• {area_name}")
     
     return page
+
+
+def render_investor_dashboard():
+    """Render the investor-focused dashboard with edge-gaining tools."""
+    st.title("🎯 Investor Dashboard")
+    st.markdown("Tools and insights to gain an edge in the real estate market")
+    
+    with InvestorAnalyzer() as analyzer:
+        # Market Timing Signal - Top of page
+        st.subheader("📊 Market Timing Signal")
+        
+        signals = analyzer.get_market_timing_signals()
+        
+        col1, col2, col3 = st.columns([2, 1, 1])
+        
+        with col1:
+            market_type = signals.get("market_type", "Unknown")
+            emoji = signals.get("market_emoji", "⚪")
+            st.markdown(f"### {emoji} {market_type}")
+            st.markdown(f"*{signals.get('recommendation', '')}*")
+        
+        with col2:
+            st.metric("Avg Days on Market", f"{signals.get('avg_days_on_market', 0):.0f}")
+            st.metric("Price Reduction Rate", f"{signals.get('price_reduction_rate', 0):.1f}%")
+        
+        with col3:
+            st.metric("Active Inventory", f"{signals.get('total_inventory', 0):,}")
+            st.metric("New This Week", f"{signals.get('new_listings_7d', 0):,}")
+        
+        st.markdown("---")
+        
+        # Tabs for different investor tools
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "🚀 First Mover", 
+            "💰 Investment Calc",
+            "📈 Appreciation Radar", 
+            "🔥 Distressed Props",
+            "🗺️ Area Signals"
+        ])
+        
+        # TAB 1: First Mover - New Listings
+        with tab1:
+            st.subheader("🚀 New Listings - First Mover Advantage")
+            st.markdown("Be first to see new properties. Contact agents before other investors.")
+            
+            hours = st.selectbox("Show listings from last:", [24, 48, 72, 168], index=1, 
+                               format_func=lambda x: f"{x} hours" if x < 168 else "7 days")
+            
+            new_listings = analyzer.get_new_listings(hours=hours, limit=30)
+            
+            if not new_listings.empty:
+                # Summary
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("New Listings", len(new_listings))
+                with col2:
+                    avg_price = new_listings["price"].mean()
+                    st.metric("Avg Price", f"€{avg_price:,.0f}")
+                with col3:
+                    avg_sqm = new_listings["price_per_sqm"].mean()
+                    st.metric("Avg €/sqm", f"€{avg_sqm:,.0f}" if pd.notna(avg_sqm) else "N/A")
+                
+                st.markdown("---")
+                
+                # Listings table
+                display_df = new_listings[["geography", "category", "sq_meters", "rooms", 
+                                          "price", "price_per_sqm", "hours_listed", "agency_name"]].copy()
+                display_df.columns = ["Area", "Type", "Size", "Rooms", "Price", "€/sqm", "Hours Listed", "Agent"]
+                display_df["Price"] = display_df["Price"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
+                display_df["€/sqm"] = display_df["€/sqm"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
+                display_df["Agent"] = display_df["Agent"].apply(lambda x: str(x)[:15] + "..." if x and len(str(x)) > 15 else x)
+                
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
+                
+                # New listings by area
+                st.markdown("**Hot Areas (Most New Listings)**")
+                area_new = analyzer.get_new_listings_by_area(hours=hours)
+                if not area_new.empty:
+                    for _, row in area_new.head(5).iterrows():
+                        st.write(f"📍 **{row['geography']}**: {int(row['new_listings'])} new listings")
+            else:
+                st.info(f"No new listings in the last {hours} hours.")
+        
+        # TAB 2: Investment Calculator
+        with tab2:
+            st.subheader("💰 Investment Calculator")
+            st.markdown("Calculate ROI, cap rate, and cash flow for potential investments")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**Property Details**")
+                purchase_price = st.number_input("Purchase Price (€)", value=250000, step=10000)
+                sq_meters = st.number_input("Size (sqm)", value=80, step=5)
+                monthly_rent = st.number_input("Expected Monthly Rent (€)", value=800, step=50)
+            
+            with col2:
+                st.markdown("**Financing**")
+                down_payment_pct = st.slider("Down Payment (%)", 10, 100, 20)
+                interest_rate = st.slider("Interest Rate (%)", 1.0, 10.0, 4.5, 0.1)
+                loan_term = st.selectbox("Loan Term (years)", [15, 20, 25, 30], index=2)
+            
+            expenses_pct = st.slider("Annual Expenses (% of rent)", 10, 40, 25, 
+                                    help="Include: maintenance, insurance, vacancy, property tax")
+            
+            if st.button("Calculate Investment Metrics", type="primary"):
+                metrics = analyzer.calculate_investment_metrics(
+                    purchase_price=purchase_price,
+                    monthly_rent=monthly_rent,
+                    down_payment_pct=down_payment_pct,
+                    interest_rate=interest_rate,
+                    loan_term_years=loan_term,
+                    annual_expenses_pct=expenses_pct,
+                )
+                
+                st.markdown("---")
+                st.markdown("### 📊 Investment Analysis")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    cap_rate = metrics["cap_rate"]
+                    cap_color = "green" if cap_rate >= 5 else ("orange" if cap_rate >= 3 else "red")
+                    st.metric("Cap Rate", f"{cap_rate:.2f}%")
+                    st.caption("NOI / Purchase Price")
+                
+                with col2:
+                    coc = metrics["cash_on_cash_return"]
+                    st.metric("Cash-on-Cash", f"{coc:.2f}%")
+                    st.caption("Annual Cash / Down Payment")
+                
+                with col3:
+                    roi = metrics["total_roi"]
+                    st.metric("Total ROI", f"{roi:.2f}%")
+                    st.caption("Including 3% appreciation")
+                
+                with col4:
+                    cashflow = metrics["monthly_cashflow"]
+                    cf_color = "green" if cashflow > 0 else "red"
+                    st.metric("Monthly Cash Flow", f"€{cashflow:,.0f}")
+                
+                st.markdown("---")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("**Income & Expenses**")
+                    st.write(f"• Annual Rent: €{metrics['annual_rent']:,.0f}")
+                    st.write(f"• Annual Expenses: €{metrics['annual_expenses']:,.0f}")
+                    st.write(f"• NOI: €{metrics['net_operating_income']:,.0f}")
+                    st.write(f"• Annual Mortgage: €{metrics['annual_mortgage']:,.0f}")
+                    st.write(f"• **Net Cash Flow: €{metrics['annual_cashflow']:,.0f}**")
+                
+                with col2:
+                    st.markdown("**Key Metrics**")
+                    st.write(f"• Down Payment: €{metrics['down_payment']:,.0f}")
+                    st.write(f"• Loan Amount: €{metrics['loan_amount']:,.0f}")
+                    st.write(f"• Monthly Mortgage: €{metrics['monthly_mortgage']:,.0f}")
+                    st.write(f"• GRM: {metrics['gross_rent_multiplier']:.1f} years")
+                    st.write(f"• Break-even Occupancy: {metrics['break_even_occupancy']:.0f}%")
+                
+                # Investment verdict
+                st.markdown("---")
+                if cap_rate >= 5 and cashflow > 0:
+                    st.success("✅ **Strong Investment** - Good cap rate and positive cash flow")
+                elif cap_rate >= 3 and cashflow >= 0:
+                    st.warning("⚠️ **Moderate Investment** - Acceptable returns, consider negotiating price")
+                else:
+                    st.error("❌ **Weak Investment** - Low returns or negative cash flow")
+        
+        # TAB 3: Appreciation Radar
+        with tab3:
+            st.subheader("📈 Appreciation Radar")
+            st.markdown("Areas with highest appreciation potential based on market signals")
+            
+            appreciation_df = analyzer.get_appreciation_leaders(min_listings=3)
+            
+            if not appreciation_df.empty:
+                # Top areas chart
+                import plotly.express as px
+                
+                top_10 = appreciation_df.head(10)
+                fig = px.bar(
+                    top_10,
+                    x="geography",
+                    y="appreciation_score",
+                    color="appreciation_score",
+                    color_continuous_scale="RdYlGn",
+                    title="Top 10 Areas by Appreciation Potential"
+                )
+                fig.update_layout(showlegend=False, xaxis_tickangle=-45)
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Detailed table
+                st.markdown("**Area Details**")
+                display_df = appreciation_df[["geography", "appreciation_score", "trend", 
+                                             "total_listings", "avg_price_sqm", "avg_dom", 
+                                             "new_listings_30d"]].head(15)
+                display_df.columns = ["Area", "Score", "Trend", "Listings", "Avg €/sqm", "Avg DOM", "New (30d)"]
+                display_df["Avg €/sqm"] = display_df["Avg €/sqm"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
+                display_df["Avg DOM"] = display_df["Avg DOM"].apply(lambda x: f"{x:.0f}" if pd.notna(x) else "N/A")
+                
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
+                
+                # Legend
+                st.markdown("""
+                **Score Components:**
+                - 🔥 Activity (40%): New listing volume
+                - ⚡ Velocity (35%): How fast properties sell
+                - 💪 Health (25%): Low price reduction rate
+                """)
+            else:
+                st.info("Not enough data for appreciation analysis.")
+        
+        # TAB 4: Distressed Properties
+        with tab4:
+            st.subheader("🔥 Distressed Properties")
+            st.markdown("Maximum negotiation leverage - motivated sellers")
+            
+            distressed_df = analyzer.get_distressed_properties(limit=30)
+            
+            if not distressed_df.empty:
+                # Summary stats
+                col1, col2, col3, col4 = st.columns(4)
+                
+                high_distress = len(distressed_df[distressed_df["distress_level"].isin(["High", "Very High"])])
+                with col1:
+                    st.metric("High Distress", high_distress)
+                with col2:
+                    avg_dom = distressed_df["days_on_market"].mean()
+                    st.metric("Avg Days Listed", f"{avg_dom:.0f}")
+                with col3:
+                    reduced_pct = distressed_df["price_reduced"].mean() * 100
+                    st.metric("Price Reduced", f"{reduced_pct:.0f}%")
+                with col4:
+                    avg_below = distressed_df["below_avg_pct"].mean()
+                    st.metric("Avg Below Market", f"{avg_below:.1f}%")
+                
+                st.markdown("---")
+                
+                # Distressed properties table
+                display_df = distressed_df[["geography", "category", "sq_meters", "price", 
+                                           "price_per_sqm", "days_on_market", "below_avg_pct",
+                                           "distress_score", "distress_level"]].copy()
+                display_df.columns = ["Area", "Type", "Size", "Price", "€/sqm", "Days", "Below Avg %", "Score", "Level"]
+                display_df["Price"] = display_df["Price"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
+                display_df["€/sqm"] = display_df["€/sqm"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
+                display_df["Below Avg %"] = display_df["Below Avg %"].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else "N/A")
+                
+                st.dataframe(
+                    display_df, 
+                    use_container_width=True, 
+                    hide_index=True,
+                    column_config={
+                        "Score": st.column_config.ProgressColumn(
+                            "Score",
+                            min_value=0,
+                            max_value=10,
+                            format="%.1f"
+                        )
+                    }
+                )
+                
+                st.markdown("""
+                **Distress Indicators:**
+                - 📅 Long days on market (35%)
+                - 📉 Price already reduced (40%)
+                - 💰 Below area average (25%)
+                """)
+            else:
+                st.info("No distressed properties found.")
+        
+        # TAB 5: Area Market Signals
+        with tab5:
+            st.subheader("🗺️ Market Signals by Area")
+            st.markdown("Identify buyer's and seller's markets in each neighborhood")
+            
+            area_signals = analyzer.get_market_health_by_area(min_listings=3)
+            
+            if not area_signals.empty:
+                # Group by market type
+                col1, col2, col3 = st.columns(3)
+                
+                buyers = area_signals[area_signals["market_type"].str.contains("Buyer")]
+                sellers = area_signals[area_signals["market_type"].str.contains("Seller")]
+                balanced = area_signals[area_signals["market_type"].str.contains("Balanced")]
+                
+                with col1:
+                    st.markdown("### 🟢 Buyer's Markets")
+                    st.caption("Good for negotiating")
+                    if not buyers.empty:
+                        for _, row in buyers.head(8).iterrows():
+                            st.write(f"• {row['geography']}")
+                            st.caption(f"  DOM: {row['avg_dom']:.0f}d, Reduced: {row['reduction_rate']:.0f}%")
+                    else:
+                        st.write("None identified")
+                
+                with col2:
+                    st.markdown("### 🟡 Balanced Markets")
+                    st.caption("Normal conditions")
+                    if not balanced.empty:
+                        for _, row in balanced.head(8).iterrows():
+                            st.write(f"• {row['geography']}")
+                            st.caption(f"  DOM: {row['avg_dom']:.0f}d, Reduced: {row['reduction_rate']:.0f}%")
+                    else:
+                        st.write("None identified")
+                
+                with col3:
+                    st.markdown("### 🔴 Seller's Markets")
+                    st.caption("Act fast on deals")
+                    if not sellers.empty:
+                        for _, row in sellers.head(8).iterrows():
+                            st.write(f"• {row['geography']}")
+                            st.caption(f"  DOM: {row['avg_dom']:.0f}d, Reduced: {row['reduction_rate']:.0f}%")
+                    else:
+                        st.write("None identified")
+                
+                st.markdown("---")
+                
+                # Full table
+                st.markdown("**All Areas**")
+                display_df = area_signals[["geography", "market_type", "listings", "avg_dom", "reduction_rate", "new_7d"]]
+                display_df.columns = ["Area", "Market Type", "Listings", "Avg DOM", "Reduction %", "New (7d)"]
+                display_df["Avg DOM"] = display_df["Avg DOM"].apply(lambda x: f"{x:.0f}" if pd.notna(x) else "N/A")
+                display_df["Reduction %"] = display_df["Reduction %"].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else "N/A")
+                
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
+            else:
+                st.info("Not enough data for area analysis.")
 
 
 def render_overview_page():
@@ -924,12 +1254,12 @@ def main():
         page = render_sidebar()
         
         # Render selected page
-        if page == "Overview":
-            render_overview_page()
-        elif page == "Market Intelligence":
-            render_market_intelligence_page()
+        if page == "Investor Dashboard":
+            render_investor_dashboard()
         elif page == "Deal Finder":
             render_deal_finder_page()
+        elif page == "Market Intelligence":
+            render_market_intelligence_page()
         elif page == "Property Insights":
             render_property_insights_page()
         elif page == "Area Analysis":
