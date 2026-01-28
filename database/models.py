@@ -274,18 +274,28 @@ def _load_seed_data():
                 for row in csv.DictReader(f):
                     run_id = safe_int(row.get("id"))
                     if run_id:
-                        run = CollectionRun(
+                        # Parse datetime strings
+                        started = None
+                        completed = None
+                        try:
+                            if row.get("started_at"):
+                                started = datetime.strptime(row["started_at"], "%Y-%m-%d %H:%M:%S")
+                        except:
+                            pass
+                        try:
+                            if row.get("completed_at"):
+                                completed = datetime.strptime(row["completed_at"], "%Y-%m-%d %H:%M:%S")
+                        except:
+                            pass
+                        
+                        session.merge(CollectionRun(
                             id=run_id,
+                            started_at=started,
+                            completed_at=completed,
                             properties_found=safe_int(row.get("properties_found")) or 0,
                             new_properties=safe_int(row.get("new_properties")) or 0,
                             status=row.get("status") or "completed",
-                        )
-                        # Set timestamps if available
-                        if row.get("started_at"):
-                            run.started_at = row["started_at"]
-                        if row.get("completed_at"):
-                            run.completed_at = row["completed_at"]
-                        session.merge(run)
+                        ))
                         count += 1
             session.commit()
             print(f"  Loaded {count} collection runs")
