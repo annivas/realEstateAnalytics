@@ -25,25 +25,40 @@ MAX_RESULTS = 5000
 REQUEST_DELAY = 1.0
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-    "Accept": "application/json",
-    "Accept-Language": "en-US,en;q=0.9,el;q=0.8",
-    "Referer": "https://www.spitogatos.gr/",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "el-GR,el;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Referer": "https://www.spitogatos.gr/pwliseis-katoikies/attiki",
     "Origin": "https://www.spitogatos.gr",
+    "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
 }
 
 
 def fetch_url(url):
     """Fetch URL and return JSON data."""
-    if USE_HTTPX:
-        with httpx.Client(headers=HEADERS, timeout=30) as client:
-            response = client.get(url)
-            if response.status_code == 200 and response.content:
-                return response.json()
-    else:
-        req = urllib.request.Request(url, headers=HEADERS)
-        with urllib.request.urlopen(req, timeout=30) as response:
-            return json.loads(response.read().decode())
+    try:
+        if USE_HTTPX:
+            with httpx.Client(headers=HEADERS, timeout=30, follow_redirects=True) as client:
+                response = client.get(url)
+                print(f"  Response status: {response.status_code}, size: {len(response.content)} bytes")
+                if response.status_code == 200 and response.content:
+                    return response.json()
+                else:
+                    print(f"  Response text: {response.text[:500] if response.text else 'empty'}")
+        else:
+            req = urllib.request.Request(url, headers=HEADERS)
+            with urllib.request.urlopen(req, timeout=30) as response:
+                data = response.read()
+                print(f"  Response size: {len(data)} bytes")
+                return json.loads(data.decode())
+    except Exception as e:
+        print(f"  Fetch error: {e}")
     return None
 
 
