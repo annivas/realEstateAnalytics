@@ -252,10 +252,27 @@ def _load_seed_data():
             except:
                 return None
         
-        # Create default collection run
-        run = CollectionRun(id=1, status="completed", properties_found=0)
-        session.merge(run)
-        session.commit()
+        # Load collection runs first (needed for foreign key references)
+        runs_csv = data_dir / "collection_runs.csv"
+        if runs_csv.exists():
+            with open(runs_csv, "r", encoding="utf-8") as f:
+                for row in csv.DictReader(f):
+                    if safe_int(row.get("id")):
+                        session.merge(CollectionRun(
+                            id=safe_int(row["id"]),
+                            started_at=row.get("started_at") or None,
+                            completed_at=row.get("completed_at") or None,
+                            properties_found=safe_int(row.get("properties_found")) or 0,
+                            new_properties=safe_int(row.get("new_properties")) or 0,
+                            status=row.get("status") or "completed",
+                        ))
+            session.commit()
+            print(f"Loaded {session.query(CollectionRun).count()} collection runs from seed data")
+        else:
+            # Create default collection run if no CSV
+            run = CollectionRun(id=1, status="completed", properties_found=0)
+            session.merge(run)
+            session.commit()
         
         # Load agents
         agents_csv = data_dir / "agents.csv"
