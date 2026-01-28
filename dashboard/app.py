@@ -1215,6 +1215,90 @@ def render_market_intelligence_page():
     st.markdown("Advanced market analysis and investment insights")
     
     with AdvancedInsightsAnalyzer() as analyzer:
+        # Historical Trends Section
+        st.subheader("📈 Historical Trends")
+        st.markdown("Track market changes over time based on collected data")
+        
+        # Get historical data
+        price_history = analyzer.get_price_history_by_date()
+        market_snapshots = analyzer.get_market_snapshot_comparison()
+        
+        if not price_history.empty and len(price_history) > 1:
+            # Price trend chart
+            import plotly.express as px
+            import plotly.graph_objects as go
+            
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=price_history["date"],
+                y=price_history["avg_price_sqm"],
+                mode="lines+markers",
+                name="Avg €/sqm",
+                line=dict(color="#1f77b4", width=2),
+                marker=dict(size=8)
+            ))
+            fig.update_layout(
+                title="Average Price per sqm Over Time",
+                xaxis_title="Date",
+                yaxis_title="€/sqm",
+                hovermode="x unified"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Market snapshot comparison table
+            if not market_snapshots.empty:
+                st.markdown("**Market Snapshots by Collection Date**")
+                display_df = market_snapshots.copy()
+                display_df["avg_price"] = display_df["avg_price"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
+                display_df["avg_price_sqm"] = display_df["avg_price_sqm"].apply(lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A")
+                display_df["reduction_rate"] = display_df["reduction_rate"].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else "N/A")
+                display_df.columns = ["Date", "Properties", "Avg Price", "Avg €/sqm", "Avg Size", "Reduced", "Reduction %"]
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
+            
+            # Summary metrics comparing first and last collection
+            if len(market_snapshots) >= 2:
+                first = market_snapshots.iloc[-1]  # oldest
+                last = market_snapshots.iloc[0]   # newest
+                
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    prop_change = last["total_properties"] - first["total_properties"]
+                    st.metric(
+                        "Inventory Change", 
+                        f"{last['total_properties']:,}",
+                        delta=f"{prop_change:+,}" if prop_change != 0 else None
+                    )
+                
+                with col2:
+                    if pd.notna(first["avg_price_sqm"]) and pd.notna(last["avg_price_sqm"]):
+                        price_change = last["avg_price_sqm"] - first["avg_price_sqm"]
+                        price_change_pct = (price_change / first["avg_price_sqm"]) * 100
+                        st.metric(
+                            "Avg €/sqm Change",
+                            f"€{last['avg_price_sqm']:,.0f}",
+                            delta=f"{price_change_pct:+.1f}%"
+                        )
+                    else:
+                        st.metric("Avg €/sqm", "N/A")
+                
+                with col3:
+                    st.metric(
+                        "Current Reductions",
+                        f"{last['reduced_listings']:,}",
+                        delta=None
+                    )
+                
+                with col4:
+                    st.metric(
+                        "Reduction Rate",
+                        f"{last['reduction_rate']:.1f}%" if pd.notna(last['reduction_rate']) else "N/A"
+                    )
+        else:
+            st.info("📊 Historical trends will appear here as more data is collected. Run data collection multiple times to build trend data.")
+        
+        st.markdown("---")
+        
         # Investment Scores
         st.subheader("🎯 Investment Area Scores")
         st.markdown("Areas ranked by investment potential (value + liquidity + activity)")

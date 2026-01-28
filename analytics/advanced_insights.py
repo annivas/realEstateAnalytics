@@ -1088,3 +1088,116 @@ class AdvancedInsightsAnalyzer:
             }
         
         return result
+    
+    # ==================== HISTORICAL TRENDS ====================
+    
+    def get_price_history_by_date(self) -> pd.DataFrame:
+        """Get average price per sqm over time from all snapshots."""
+        query = """
+            SELECT 
+                DATE(ps.collected_at) as date,
+                COUNT(DISTINCT ps.property_id) as properties,
+                AVG(ps.price) as avg_price,
+                AVG(ps.price_per_sqm) as avg_price_sqm,
+                SUM(CASE WHEN ps.price_reduced = 1 THEN 1 ELSE 0 END) as reduced_count
+            FROM property_snapshots ps
+            WHERE ps.price_per_sqm IS NOT NULL
+            GROUP BY DATE(ps.collected_at)
+            ORDER BY date ASC
+        """
+        return pd.read_sql(query, self.session.bind)
+    
+    def get_inventory_history(self) -> pd.DataFrame:
+        """Get inventory count over time."""
+        query = """
+            SELECT 
+                DATE(ps.collected_at) as date,
+                cr.id as collection_run,
+                COUNT(DISTINCT ps.property_id) as total_listings,
+                cr.new_properties,
+                cr.properties_found
+            FROM property_snapshots ps
+            JOIN collection_runs cr ON ps.collection_run_id = cr.id
+            GROUP BY DATE(ps.collected_at), cr.id
+            ORDER BY date ASC
+        """
+        return pd.read_sql(query, self.session.bind)
+    
+    def get_price_changes_over_time(self) -> pd.DataFrame:
+        """Track properties that had price changes."""
+        query = """
+            SELECT 
+                DATE(ps.collected_at) as date,
+                COUNT(CASE WHEN ps.price_reduced = 1 THEN 1 END) as reductions,
+                COUNT(*) as total_snapshots,
+                ROUND(COUNT(CASE WHEN ps.price_reduced = 1 THEN 1 END) * 100.0 / COUNT(*), 1) as reduction_pct
+            FROM property_snapshots ps
+            GROUP BY DATE(ps.collected_at)
+            ORDER BY date ASC
+        """
+        return pd.read_sql(query, self.session.bind)
+    
+    def get_area_price_history(self, min_properties: int = 5) -> pd.DataFrame:
+        """Get price history by area over time."""
+        query = """
+            SELECT 
+                DATE(ps.collected_at) as date,
+                p.geography,
+                COUNT(DISTINCT ps.property_id) as properties,
+                AVG(ps.price_per_sqm) as avg_price_sqm
+            FROM property_snapshots ps
+            JOIN properties p ON ps.property_id = p.id
+            WHERE p.geography IS NOT NULL AND ps.price_per_sqm IS NOT NULL
+            GROUP BY DATE(ps.collected_at), p.geography
+            HAVING COUNT(DISTINCT ps.property_id) >= :min_properties
+            ORDER BY date ASC, p.geography
+        """
+        return pd.read_sql(query, self.session.bind, params={"min_properties": min_properties})
+    
+    def get_collection_runs_history(self) -> pd.DataFrame:
+        """Get all collection run history."""
+        query = """
+            SELECT 
+                id,
+                started_at,
+                completed_at,
+                properties_found,
+                new_properties,
+                status
+            FROM collection_runs
+            ORDER BY started_at DESC
+        """
+        return pd.read_sql(query, self.session.bind)
+    
+    def get_property_price_history(self, property_id: int) -> pd.DataFrame:
+        """Get price history for a specific property."""
+        query = """
+            SELECT 
+                ps.collected_at,
+                ps.price,
+                ps.price_per_sqm,
+                ps.price_reduced,
+                ps.price_change_percentage
+            FROM property_snapshots ps
+            WHERE ps.property_id = :property_id
+            ORDER BY ps.collected_at ASC
+        """
+        return pd.read_sql(query, self.session.bind, params={"property_id": property_id})
+    
+    def get_market_snapshot_comparison(self) -> pd.DataFrame:
+        """Compare market metrics across different collection dates."""
+        query = """
+            SELECT 
+                DATE(ps.collected_at) as date,
+                COUNT(DISTINCT ps.property_id) as total_properties,
+                ROUND(AVG(ps.price), 0) as avg_price,
+                ROUND(AVG(ps.price_per_sqm), 0) as avg_price_sqm,
+                ROUND(AVG(p.sq_meters), 0) as avg_size,
+                SUM(CASE WHEN ps.price_reduced = 1 THEN 1 ELSE 0 END) as reduced_listings,
+                ROUND(SUM(CASE WHEN ps.price_reduced = 1 THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) as reduction_rate
+            FROM property_snapshots ps
+            JOIN properties p ON ps.property_id = p.id
+            GROUP BY DATE(ps.collected_at)
+            ORDER BY date DESC
+        """
+        return pd.read_sql(query, self.session.bind)
