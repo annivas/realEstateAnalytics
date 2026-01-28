@@ -1188,8 +1188,9 @@ def render_data_collection_page():
         if st.button("🔄 Refresh Data Now", type="primary", use_container_width=True):
             with st.spinner("Collecting data from API... This may take a few minutes."):
                 try:
-                    from collector.data_collector import collect_and_store
-                    result = collect_and_store()
+                    from collector.api_client import SpitogatosClient
+                    client = SpitogatosClient()
+                    result = client.collect_and_store()
                     st.success(f"✅ Collection complete! Found {result.get('properties_found', 0):,} properties, {result.get('new_properties', 0):,} new.")
                     st.rerun()
                 except Exception as e:
