@@ -1185,19 +1185,20 @@ def render_data_collection_page():
     col_btn, col_status = st.columns([1, 3])
     
     with col_btn:
-        if st.button("🔄 Refresh Data Now", type="primary", use_container_width=True):
-            with st.spinner("Collecting data from API... This may take a few minutes."):
-                try:
-                    from collector.api_client import SpitogatosClient
-                    client = SpitogatosClient()
-                    result = client.collect_and_store()
-                    st.success(f"✅ Collection complete! Found {result.get('properties_found', 0):,} properties, {result.get('new_properties', 0):,} new.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Collection failed: {str(e)}")
+        if st.button("🔄 Trigger GitHub Action", type="primary", use_container_width=True):
+            st.info("📋 **To refresh data manually:**")
+            st.markdown("""
+            1. Go to [GitHub Actions](https://github.com/annivas/realEstateAnalytics/actions)
+            2. Click **"Daily Data Collection"** workflow
+            3. Click **"Run workflow"** → **"Run workflow"**
+            4. Wait ~2-3 minutes for completion
+            5. Reboot this app from Streamlit Cloud dashboard
+            
+            *The API blocks requests from cloud servers. GitHub Actions runs from different IPs that work.*
+            """)
     
     with col_status:
-        st.caption("Click to manually trigger data collection from the API")
+        st.caption("Data is collected daily at 6:00 AM UTC via GitHub Actions")
     
     st.markdown("---")
     
