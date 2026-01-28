@@ -70,16 +70,16 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           
-          # Pull latest changes first
-          git fetch origin main
-          git reset --soft origin/main
-          
+          # Only add CSV data files - never touch code
           git add data/*.csv
           
-          # Only commit if there are changes
+          # Only commit if there are changes to CSV files
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
             git commit -m "Daily data update: $(date +'%Y-%m-%d')"
+            
+            # Pull and rebase to handle any concurrent changes, then push
+            git pull --rebase origin main
             git push origin main
           fi
