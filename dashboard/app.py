@@ -1179,28 +1179,7 @@ def render_agent_insights_page():
 def render_data_collection_page():
     """Render the data collection management page."""
     st.title("Data Collection")
-    st.markdown("Monitor and manage data collection")
-    
-    # Manual refresh button
-    col_btn, col_status = st.columns([1, 3])
-    
-    with col_btn:
-        if st.button("🔄 Trigger GitHub Action", type="primary", use_container_width=True):
-            st.info("📋 **To refresh data manually:**")
-            st.markdown("""
-            1. Go to [GitHub Actions](https://github.com/annivas/realEstateAnalytics/actions)
-            2. Click **"Daily Data Collection"** workflow
-            3. Click **"Run workflow"** → **"Run workflow"**
-            4. Wait ~2-3 minutes for completion
-            5. Reboot this app from Streamlit Cloud dashboard
-            
-            *The API blocks requests from cloud servers. GitHub Actions runs from different IPs that work.*
-            """)
-    
-    with col_status:
-        st.caption("Data is collected daily at 6:00 AM UTC via GitHub Actions")
-    
-    st.markdown("---")
+    st.markdown("Data is automatically collected twice daily at 6 AM and 6 PM UTC")
     
     with InventoryAnalyzer() as analyzer:
         collection_history = analyzer.get_collection_history(limit=20)
@@ -1228,46 +1207,6 @@ def render_data_collection_page():
     # Collection history
     st.subheader("Collection History")
     render_collection_history_table(collection_history)
-    
-    st.markdown("---")
-    
-    # Instructions
-    st.subheader("How to Collect Data")
-    
-    with st.expander("Manual Collection"):
-        st.markdown("""
-        Run the following command to collect data manually:
-        
-        ```bash
-        python scripts/run_collection.py
-        ```
-        
-        This will fetch all listings from the configured areas and store them in the database.
-        """)
-    
-    with st.expander("Scheduled Collection"):
-        st.markdown("""
-        To set up automated data collection, run the scheduler:
-        
-        ```bash
-        python collector/scheduler.py --run-now
-        ```
-        
-        Options:
-        - `--hour`: Hour to run (0-23)
-        - `--minute`: Minute to run (0-59)
-        - `--days`: Days to run ('*' for all, 'mon-fri' for weekdays)
-        - `--run-now`: Run immediately on start
-        """)
-    
-    with st.expander("Configuration"):
-        st.markdown("""
-        Edit `config.py` to modify:
-        
-        - **MONITORED_AREAS**: Add or remove area IDs to track
-        - **COLLECTION_SCHEDULE**: Change default collection times
-        - **REQUEST_DELAY_SECONDS**: Adjust API rate limiting
-        """)
 
 
 def render_market_intelligence_page():
