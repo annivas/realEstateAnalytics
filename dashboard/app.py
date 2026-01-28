@@ -1181,6 +1181,25 @@ def render_data_collection_page():
     st.title("Data Collection")
     st.markdown("Monitor and manage data collection")
     
+    # Manual refresh button
+    col_btn, col_status = st.columns([1, 3])
+    
+    with col_btn:
+        if st.button("🔄 Refresh Data Now", type="primary", use_container_width=True):
+            with st.spinner("Collecting data from API... This may take a few minutes."):
+                try:
+                    from collector.data_collector import collect_and_store
+                    result = collect_and_store()
+                    st.success(f"✅ Collection complete! Found {result.get('properties_found', 0):,} properties, {result.get('new_properties', 0):,} new.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Collection failed: {str(e)}")
+    
+    with col_status:
+        st.caption("Click to manually trigger data collection from the API")
+    
+    st.markdown("---")
+    
     with InventoryAnalyzer() as analyzer:
         collection_history = analyzer.get_collection_history(limit=20)
     
