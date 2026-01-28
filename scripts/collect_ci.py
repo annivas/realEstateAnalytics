@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """
-Simplified data collection script for CI/GitHub Actions.
-Collects data and stores directly without complex dependencies.
+Robust data collection script for CI/GitHub Actions.
+- Handles API rate limiting with retries and backoff
+- Preserves historical data (never overwrites)
+- Tracks property lifecycle (new, updated, removed)
 """
 import json
 import time
 import sqlite3
 import os
+import random
 from datetime import datetime
 from pathlib import Path
 
@@ -22,7 +25,9 @@ except ImportError:
 API_URL = "https://www.spitogatos.gr/n_api/v1/properties/search-results-map"
 AREA_IDS = [105103]  # Athens Region
 MAX_RESULTS = 5000
-REQUEST_DELAY = 1.0
+MIN_RESPONSE_SIZE = 5000  # Responses smaller than this are likely blocked
+MAX_RETRIES = 3
+BASE_DELAY = 2.0  # Base delay between requests
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -37,28 +42,61 @@ HEADERS = {
     "Sec-Fetch-Dest": "empty",
     "Sec-Fetch-Mode": "cors",
     "Sec-Fetch-Site": "same-origin",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
 }
 
 
-def fetch_url(url):
-    """Fetch URL and return JSON data."""
+def fetch_url(url, attempt=1):
+    """Fetch URL with retry logic for rate limiting."""
+    # Add jitter to avoid detection
+    jitter = random.uniform(0.5, 1.5)
+    
     try:
         if USE_HTTPX:
             with httpx.Client(headers=HEADERS, timeout=30, follow_redirects=True) as client:
                 response = client.get(url)
-                print(f"  Response status: {response.status_code}, size: {len(response.content)} bytes")
+                size = len(response.content)
+                print(f"  [Attempt {attempt}] Status: {response.status_code}, Size: {size:,} bytes")
+                
+                # Check for rate limiting (small response)
+                if response.status_code == 200 and size < MIN_RESPONSE_SIZE:
+                    print(f"  ⚠️  Response too small - likely rate limited")
+                    if attempt < MAX_RETRIES:
+                        backoff = BASE_DELAY * (2 ** attempt) * jitter
+                        print(f"  ⏳ Backing off for {backoff:.1f}s before retry...")
+                        time.sleep(backoff)
+                        return fetch_url(url, attempt + 1)
+                    return None
+                
                 if response.status_code == 200 and response.content:
                     return response.json()
-                else:
-                    print(f"  Response text: {response.text[:500] if response.text else 'empty'}")
         else:
             req = urllib.request.Request(url, headers=HEADERS)
             with urllib.request.urlopen(req, timeout=30) as response:
                 data = response.read()
-                print(f"  Response size: {len(data)} bytes")
+                size = len(data)
+                print(f"  [Attempt {attempt}] Size: {size:,} bytes")
+                
+                if size < MIN_RESPONSE_SIZE:
+                    print(f"  ⚠️  Response too small - likely rate limited")
+                    if attempt < MAX_RETRIES:
+                        backoff = BASE_DELAY * (2 ** attempt) * jitter
+                        print(f"  ⏳ Backing off for {backoff:.1f}s before retry...")
+                        time.sleep(backoff)
+                        return fetch_url(url, attempt + 1)
+                    return None
+                
                 return json.loads(data.decode())
+                
     except Exception as e:
-        print(f"  Fetch error: {e}")
+        print(f"  ❌ Fetch error: {e}")
+        if attempt < MAX_RETRIES:
+            backoff = BASE_DELAY * (2 ** attempt) * jitter
+            print(f"  ⏳ Retrying in {backoff:.1f}s...")
+            time.sleep(backoff)
+            return fetch_url(url, attempt + 1)
+    
     return None
 
 
@@ -120,8 +158,17 @@ def init_database(db_path):
             completed_at TIMESTAMP,
             properties_found INTEGER DEFAULT 0,
             new_properties INTEGER DEFAULT 0,
+            updated_properties INTEGER DEFAULT 0,
+            removed_properties INTEGER DEFAULT 0,
+            price_changes INTEGER DEFAULT 0,
             status TEXT DEFAULT 'running'
         );
+        
+        -- Index for faster lookups
+        CREATE INDEX IF NOT EXISTS idx_snapshots_property ON property_snapshots(property_id);
+        CREATE INDEX IF NOT EXISTS idx_snapshots_collected ON property_snapshots(collected_at);
+        CREATE INDEX IF NOT EXISTS idx_properties_active ON properties(is_active);
+        CREATE INDEX IF NOT EXISTS idx_properties_geography ON properties(geography);
     """)
     
     conn.commit()
@@ -190,7 +237,7 @@ def load_existing_data(conn, data_dir):
                     pass
         conn.commit()
     
-    # Load snapshots (critical for historical data!)
+    # Load snapshots
     snaps_csv = data_dir / "snapshots.csv"
     if snaps_csv.exists():
         print(f"Loading existing snapshots from {snaps_csv}")
@@ -242,119 +289,182 @@ def load_existing_data(conn, data_dir):
                     pass
         conn.commit()
     
-    # Reset auto-increment counters to continue after existing data
-    # This prevents ID conflicts when adding new records
+    # Reset auto-increment counters
     for table in ["property_snapshots", "collection_runs"]:
         max_id = cursor.execute(f"SELECT MAX(id) FROM {table}").fetchone()[0]
         if max_id:
-            cursor.execute(f"UPDATE sqlite_sequence SET seq = ? WHERE name = ?", (max_id, table))
+            cursor.execute(f"DELETE FROM sqlite_sequence WHERE name = ?", (table,))
+            cursor.execute(f"INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)", (table, max_id))
     conn.commit()
     
     # Report loaded counts
+    print("\n📊 Existing data loaded:")
     for table in ["agents", "properties", "property_snapshots", "collection_runs"]:
         count = cursor.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-        print(f"  {table}: {count} rows loaded")
+        print(f"  {table}: {count:,} rows")
 
 
 def collect_data():
-    """Main collection function."""
+    """Main collection function with robust error handling."""
     # Setup paths
     project_root = Path(__file__).parent.parent
     data_dir = project_root / "data"
     data_dir.mkdir(exist_ok=True)
     db_path = data_dir / "real_estate.db"
     
-    print(f"Database: {db_path}")
-    print(f"Collecting from {len(AREA_IDS)} areas, max {MAX_RESULTS} results")
-    print("-" * 50)
+    print("=" * 60)
+    print("🏠 REAL ESTATE DATA COLLECTION")
+    print("=" * 60)
+    print(f"📁 Database: {db_path}")
+    print(f"🎯 Areas: {AREA_IDS}")
+    print(f"📦 Max results: {MAX_RESULTS:,}")
+    print("=" * 60)
     
     conn = init_database(str(db_path))
     cursor = conn.cursor()
     
-    # Load existing data from CSVs first (preserves historical data!)
-    print("\nLoading existing data...")
+    # Load existing data from CSVs (preserves historical data)
+    print("\n📥 Loading existing data...")
     load_existing_data(conn, data_dir)
-    print("-" * 50)
+    
+    # Get current active property IDs (to detect removals later)
+    cursor.execute("SELECT id FROM properties WHERE is_active = 1")
+    previously_active = set(row[0] for row in cursor.fetchall())
+    print(f"\n📋 Previously active properties: {len(previously_active):,}")
     
     # Start collection run
     cursor.execute("INSERT INTO collection_runs (status) VALUES ('running')")
     run_id = cursor.lastrowid
     conn.commit()
+    print(f"\n🚀 Started collection run #{run_id}")
+    print("-" * 60)
     
     offset = 0
     total_fetched = 0
     new_properties = 0
+    updated_properties = 0
+    price_changes = 0
+    seen_property_ids = set()
+    consecutive_failures = 0
+    max_consecutive_failures = 3
     
     try:
         while total_fetched < MAX_RESULTS:
             url = build_url(offset)
-            print(f"Fetching offset {offset}...")
+            print(f"\n📡 Fetching offset {offset}...")
+            
+            # Add random delay to avoid detection
+            delay = BASE_DELAY + random.uniform(0.5, 2.0)
+            time.sleep(delay)
             
             data = fetch_url(url)
+            
             if not data:
-                print("No data returned, stopping")
-                break
+                consecutive_failures += 1
+                print(f"  ⚠️  No data returned (failure {consecutive_failures}/{max_consecutive_failures})")
+                
+                if consecutive_failures >= max_consecutive_failures:
+                    print(f"\n❌ Too many consecutive failures, stopping collection")
+                    break
+                
+                # Try next offset anyway
+                offset += 300
+                continue
+            
+            # Reset failure counter on success
+            consecutive_failures = 0
             
             count = data.get("count", 0)
             total = data.get("total", 0)
             clusters = data.get("data", {})
             
             if offset == 0:
-                print(f"Total available: {total:,}")
+                print(f"  📊 Total available in API: {total:,}")
             
             if not clusters or count == 0:
-                print("No more data")
+                print("  ℹ️  No more data in response")
                 break
             
             # Process properties
             batch_count = 0
+            batch_new = 0
+            batch_updated = 0
+            batch_price_changes = 0
+            
             for cluster_key, cluster_data in clusters.items():
                 for prop in cluster_data.get("properties", []):
                     prop_id = prop.get("id")
                     if not prop_id:
                         continue
                     
-                    # Check if property exists
-                    cursor.execute("SELECT id FROM properties WHERE id = ?", (prop_id,))
-                    exists = cursor.fetchone()
+                    seen_property_ids.add(prop_id)
+                    
+                    # Check if property exists and get last price
+                    cursor.execute("""
+                        SELECT p.id, ps.price 
+                        FROM properties p
+                        LEFT JOIN property_snapshots ps ON p.id = ps.property_id
+                        WHERE p.id = ?
+                        ORDER BY ps.collected_at DESC LIMIT 1
+                    """, (prop_id,))
+                    existing = cursor.fetchone()
                     
                     # Get agent
                     agent_id = prop.get("agent_id")
                     re_agent = prop.get("reAgent") or {}
                     if agent_id:
                         cursor.execute("""
-                            INSERT OR REPLACE INTO agents (id, agency_name, last_seen)
+                            INSERT INTO agents (id, agency_name, last_seen)
                             VALUES (?, ?, CURRENT_TIMESTAMP)
+                            ON CONFLICT(id) DO UPDATE SET 
+                                agency_name = excluded.agency_name,
+                                last_seen = CURRENT_TIMESTAMP
                         """, (agent_id, re_agent.get("agencyName")))
                     
-                    # Insert/update property
+                    # Calculate price per sqm
                     sq_meters = prop.get("sq_meters")
                     price = prop.get("price", 0)
                     price_per_sqm = price / sq_meters if sq_meters and sq_meters > 0 else None
                     
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO properties 
-                        (id, category, subtype, buy_or_rent, geography, latitude, longitude,
-                         sq_meters, floor_number, rooms, bathrooms, ad_type, agent_id, 
-                         last_seen, is_active)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 1)
-                    """, (
-                        prop_id,
-                        prop.get("category"),
-                        prop.get("subtype"),
-                        "sale" if prop.get("buy_or_rent") == "0" else "rent",
-                        prop.get("geography"),
-                        prop.get("latitude"),
-                        prop.get("longitude"),
-                        sq_meters,
-                        prop.get("floorNumber"),
-                        prop.get("rooms"),
-                        prop.get("no_of_bathrooms"),
-                        prop.get("adType_code"),
-                        agent_id,
-                    ))
+                    if existing:
+                        # Existing property - update last_seen and check for price change
+                        cursor.execute("""
+                            UPDATE properties 
+                            SET last_seen = CURRENT_TIMESTAMP, is_active = 1
+                            WHERE id = ?
+                        """, (prop_id,))
+                        
+                        old_price = existing[1]
+                        if old_price and old_price != price:
+                            batch_price_changes += 1
+                        
+                        batch_updated += 1
+                    else:
+                        # New property
+                        cursor.execute("""
+                            INSERT INTO properties 
+                            (id, category, subtype, buy_or_rent, geography, latitude, longitude,
+                             sq_meters, floor_number, rooms, bathrooms, ad_type, agent_id,
+                             first_seen, last_seen, is_active)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)
+                        """, (
+                            prop_id,
+                            prop.get("category"),
+                            prop.get("subtype"),
+                            "sale" if prop.get("buy_or_rent") == "0" else "rent",
+                            prop.get("geography"),
+                            prop.get("latitude"),
+                            prop.get("longitude"),
+                            sq_meters,
+                            prop.get("floorNumber"),
+                            prop.get("rooms"),
+                            prop.get("no_of_bathrooms"),
+                            prop.get("adType_code"),
+                            agent_id,
+                        ))
+                        batch_new += 1
                     
-                    # Add snapshot
+                    # Always create a snapshot (this is our historical record)
                     cursor.execute("""
                         INSERT INTO property_snapshots 
                         (property_id, collection_run_id, price, price_reduced, 
@@ -370,9 +480,6 @@ def collect_data():
                         price_per_sqm,
                     ))
                     
-                    if not exists:
-                        new_properties += 1
-                    
                     batch_count += 1
                     total_fetched += 1
                     
@@ -383,16 +490,21 @@ def collect_data():
                     break
             
             conn.commit()
-            print(f"  Processed {batch_count} properties ({total_fetched:,} total)")
+            
+            new_properties += batch_new
+            updated_properties += batch_updated
+            price_changes += batch_price_changes
+            
+            print(f"  ✅ Processed {batch_count} properties ({batch_new} new, {batch_updated} updated, {batch_price_changes} price changes)")
+            print(f"     Running total: {total_fetched:,}")
             
             offset += count
             if offset >= total:
+                print(f"\n✅ Reached end of available data")
                 break
-            
-            time.sleep(REQUEST_DELAY)
     
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"\n❌ Error during collection: {e}")
         cursor.execute("""
             UPDATE collection_runs 
             SET status = 'failed', completed_at = CURRENT_TIMESTAMP
@@ -401,24 +513,62 @@ def collect_data():
         conn.commit()
         raise
     
+    # Mark properties not seen in this run as potentially removed (if we got data)
+    removed_properties = 0
+    if total_fetched > 0:
+        not_seen = previously_active - seen_property_ids
+        if not_seen:
+            print(f"\n🔍 {len(not_seen)} properties not seen in this collection")
+            # Only mark as inactive if we collected a significant amount
+            if total_fetched >= 1000:
+                cursor.execute(f"""
+                    UPDATE properties SET is_active = 0 
+                    WHERE id IN ({','.join('?' * len(not_seen))})
+                """, list(not_seen))
+                removed_properties = len(not_seen)
+                print(f"  📤 Marked {removed_properties} properties as inactive (likely sold)")
+    
     # Complete the run
     cursor.execute("""
         UPDATE collection_runs 
         SET status = 'completed', 
             completed_at = CURRENT_TIMESTAMP,
             properties_found = ?,
-            new_properties = ?
+            new_properties = ?,
+            updated_properties = ?,
+            removed_properties = ?,
+            price_changes = ?
         WHERE id = ?
-    """, (total_fetched, new_properties, run_id))
+    """, (total_fetched, new_properties, updated_properties, removed_properties, price_changes, run_id))
     conn.commit()
     
-    print("-" * 50)
-    print(f"Collection complete!")
-    print(f"  Total processed: {total_fetched:,}")
-    print(f"  New properties: {new_properties:,}")
+    # Final summary
+    print("\n" + "=" * 60)
+    print("📊 COLLECTION SUMMARY")
+    print("=" * 60)
+    print(f"  ✅ Total processed: {total_fetched:,}")
+    print(f"  🆕 New properties: {new_properties:,}")
+    print(f"  🔄 Updated properties: {updated_properties:,}")
+    print(f"  📤 Removed (sold): {removed_properties:,}")
+    print(f"  💰 Price changes: {price_changes:,}")
+    print("=" * 60)
+    
+    # Report final database state
+    print("\n📁 Final database state:")
+    for table in ["agents", "properties", "property_snapshots", "collection_runs"]:
+        count = cursor.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        print(f"  {table}: {count:,} rows")
+    
+    active = cursor.execute("SELECT COUNT(*) FROM properties WHERE is_active = 1").fetchone()[0]
+    inactive = cursor.execute("SELECT COUNT(*) FROM properties WHERE is_active = 0").fetchone()[0]
+    print(f"\n  Active properties: {active:,}")
+    print(f"  Inactive (sold): {inactive:,}")
     
     conn.close()
+    
+    return total_fetched > 0  # Return success status
 
 
 if __name__ == "__main__":
-    collect_data()
+    success = collect_data()
+    exit(0 if success else 1)
