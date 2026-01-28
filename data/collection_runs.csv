@@ -1,3 +1,4 @@
 id,started_at,completed_at,properties_found,new_properties,status
 1,2026-01-27 01:17:53,2026-01-27 01:18:03,0,0,failed
 2,2026-01-27 06:30:17,2026-01-27 06:30:26,0,0,failed
+3,2026-01-28 01:12:08,2026-01-28 01:12:08,0,0,completed
