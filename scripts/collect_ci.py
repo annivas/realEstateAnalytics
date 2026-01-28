@@ -227,6 +227,14 @@ def load_existing_data(conn, data_dir):
                     pass
         conn.commit()
     
+    # Reset auto-increment counters to continue after existing data
+    # This prevents ID conflicts when adding new records
+    for table in ["property_snapshots", "collection_runs"]:
+        max_id = cursor.execute(f"SELECT MAX(id) FROM {table}").fetchone()[0]
+        if max_id:
+            cursor.execute(f"UPDATE sqlite_sequence SET seq = ? WHERE name = ?", (max_id, table))
+    conn.commit()
+    
     # Report loaded counts
     for table in ["agents", "properties", "property_snapshots", "collection_runs"]:
         count = cursor.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]

@@ -49,21 +49,39 @@ jobs:
           
           conn = sqlite3.connect(db_path)
           
+          print("=" * 50)
+          print("DATABASE CONTENTS BEFORE EXPORT:")
+          for table in ["agents", "properties", "property_snapshots", "collection_runs"]:
+              count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+              print(f"  {table}: {count} rows")
+          print("=" * 50)
+          
           # Export each table
           for table in ["properties", "property_snapshots", "agents", "collection_runs"]:
               cursor = conn.execute(f"SELECT * FROM {table}")
               columns = [desc[0] for desc in cursor.description]
+              rows = cursor.fetchall()
               
               filename = f"data/{table.replace('property_', '')}.csv"
               with open(filename, "w", newline="") as f:
                   writer = csv.writer(f)
                   writer.writerow(columns)
-                  writer.writerows(cursor.fetchall())
+                  writer.writerows(rows)
               
-              count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-              print(f"Exported {table}: {count} rows")
+              print(f"Exported {table}: {len(rows)} rows to {filename}")
           
           conn.close()
+          
+          # Verify exported files
+          print("=" * 50)
+          print("EXPORTED CSV FILES:")
+          for f in ["agents.csv", "properties.csv", "snapshots.csv", "collection_runs.csv"]:
+              path = f"data/{f}"
+              if os.path.exists(path):
+                  with open(path) as file:
+                      lines = sum(1 for _ in file) - 1  # minus header
+                  print(f"  {f}: {lines} rows")
+          print("=" * 50)
           EOF
       
       - name: Commit and push changes
