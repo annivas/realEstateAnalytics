@@ -208,9 +208,12 @@ def render_collection_history_table(df: pd.DataFrame):
     
     display_df = df.copy()
     
-    # Format datetime columns
+    # Format datetime columns - convert to EST
     if "started_at" in display_df.columns:
-        display_df["started_at"] = pd.to_datetime(display_df["started_at"]).dt.strftime("%Y-%m-%d %H:%M")
+        # Parse as UTC and convert to EST (UTC-5)
+        display_df["started_at"] = pd.to_datetime(display_df["started_at"]).apply(
+            lambda x: (x - pd.Timedelta(hours=5)).strftime("%Y-%m-%d %H:%M EST") if pd.notna(x) else "N/A"
+        )
     
     # Add status indicator
     if "status" in display_df.columns:
