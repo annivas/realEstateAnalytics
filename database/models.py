@@ -231,9 +231,17 @@ def _load_seed_data():
     try:
         # Check if we already have data
         if session.query(Property).count() > 0:
+            print("Database already has data, skipping seed load")
             return
         
+        # Find data directory
         data_dir = Path(__file__).parent.parent / "data"
+        if not data_dir.exists():
+            # Try alternative path for Streamlit Cloud
+            import os
+            data_dir = Path(os.getcwd()) / "data"
+        
+        print(f"Loading seed data from: {data_dir}")
         
         # Helper functions
         def safe_int(val):
@@ -252,27 +260,29 @@ def _load_seed_data():
             except:
                 return None
         
-        # Load collection runs first (needed for foreign key references)
+        # Always create at least one collection run first
+        if session.query(CollectionRun).count() == 0:
+            session.merge(CollectionRun(id=1, status="completed", properties_found=0))
+            session.commit()
+        
+        # Load collection runs from CSV
         runs_csv = data_dir / "collection_runs.csv"
         if runs_csv.exists():
+            print(f"Loading collection runs from {runs_csv}")
+            count = 0
             with open(runs_csv, "r", encoding="utf-8") as f:
                 for row in csv.DictReader(f):
-                    if safe_int(row.get("id")):
+                    run_id = safe_int(row.get("id"))
+                    if run_id:
                         session.merge(CollectionRun(
-                            id=safe_int(row["id"]),
-                            started_at=row.get("started_at") or None,
-                            completed_at=row.get("completed_at") or None,
+                            id=run_id,
                             properties_found=safe_int(row.get("properties_found")) or 0,
                             new_properties=safe_int(row.get("new_properties")) or 0,
                             status=row.get("status") or "completed",
                         ))
+                        count += 1
             session.commit()
-            print(f"Loaded {session.query(CollectionRun).count()} collection runs from seed data")
-        else:
-            # Create default collection run if no CSV
-            run = CollectionRun(id=1, status="completed", properties_found=0)
-            session.merge(run)
-            session.commit()
+            print(f"  Loaded {count} collection runs")
         
         # Load agents
         agents_csv = data_dir / "agents.csv"
