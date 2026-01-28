@@ -24,10 +24,10 @@ except ImportError:
 # Configuration
 API_URL = "https://www.spitogatos.gr/n_api/v1/properties/search-results-map"
 AREA_IDS = [105103]  # Athens Region
-MAX_RESULTS = 5000
+MAX_RESULTS = 10000  # Target more properties
 MIN_RESPONSE_SIZE = 5000  # Responses smaller than this are likely blocked
-MAX_RETRIES = 3
-BASE_DELAY = 2.0  # Base delay between requests
+MAX_RETRIES = 5  # More retries
+BASE_DELAY = 5.0  # Longer delay between requests to avoid rate limiting
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -353,8 +353,12 @@ def collect_data():
             url = build_url(offset)
             print(f"\n📡 Fetching offset {offset}...")
             
-            # Add random delay to avoid detection
-            delay = BASE_DELAY + random.uniform(0.5, 2.0)
+            # Progressive delays - wait longer as we fetch more pages to avoid rate limits
+            # Pages 0-5: normal delay, Pages 6+: increasing delay
+            page_num = offset // 300
+            progressive_multiplier = 1 + (page_num // 5) * 0.5  # 1x, 1.5x, 2x, etc.
+            delay = (BASE_DELAY + random.uniform(1.0, 4.0)) * progressive_multiplier
+            print(f"  ⏳ Waiting {delay:.1f}s (page {page_num + 1})...")
             time.sleep(delay)
             
             data = fetch_url(url)
