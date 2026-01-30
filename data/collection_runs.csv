@@ -13,3 +13,4 @@ id,started_at,completed_at,properties_found,new_properties,updated_properties,re
 12,2026-01-29 06:41:48,2026-01-29 06:42:11,0,0,0,0,0,completed
 13,2026-01-29 18:36:22,2026-01-29 18:36:48,0,0,0,0,0,completed
 14,2026-01-30 06:42:26,2026-01-30 06:42:52,0,0,0,0,0,completed
+15,2026-01-30 18:34:29,2026-01-30 18:42:20,1500,833,667,915,6,completed
