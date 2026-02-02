@@ -11,17 +11,20 @@ from database.models import get_session, Property, PropertySnapshot, Agent
 
 class InvestorAnalyzer:
     """Tools for real estate investors to gain market edge."""
-    
+
     def __init__(self):
-        self.session = None
-    
-    def __enter__(self):
         self.session = get_session()
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
+
+    def close(self):
+        """Close the database session."""
         if self.session:
             self.session.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
     
     # ==================== FIRST MOVER ADVANTAGE ====================
     
@@ -30,8 +33,14 @@ class InvestorAnalyzer:
         Get brand new listings - first mover advantage.
         Properties listed in the last X hours.
         """
+        # Use latest snapshot to avoid duplicates
         query = """
-            SELECT 
+            WITH latest_snapshots AS (
+                SELECT property_id, MAX(collected_at) as max_date
+                FROM property_snapshots
+                GROUP BY property_id
+            )
+            SELECT
                 p.id,
                 p.geography,
                 p.category,
@@ -45,25 +54,33 @@ class InvestorAnalyzer:
                 a.agency_name
             FROM properties p
             JOIN property_snapshots ps ON p.id = ps.property_id
+            JOIN latest_snapshots ls ON ps.property_id = ls.property_id AND ps.collected_at = ls.max_date
             LEFT JOIN agents a ON p.agent_id = a.id
             WHERE p.is_active = 1
               AND julianday('now') - julianday(p.first_seen) <= :days
             ORDER BY p.first_seen DESC
             LIMIT :limit
         """
-        
+
         return pd.read_sql(query, self.session.bind, params={"days": hours/24, "limit": limit})
     
     def get_new_listings_by_area(self, hours: int = 48) -> pd.DataFrame:
         """Get count of new listings by area."""
+        # Use latest snapshot to avoid duplicates
         query = """
-            SELECT 
+            WITH latest_snapshots AS (
+                SELECT property_id, MAX(collected_at) as max_date
+                FROM property_snapshots
+                GROUP BY property_id
+            )
+            SELECT
                 p.geography,
-                COUNT(*) as new_listings,
+                COUNT(DISTINCT p.id) as new_listings,
                 AVG(ps.price) as avg_price,
                 AVG(ps.price_per_sqm) as avg_price_sqm
             FROM properties p
             JOIN property_snapshots ps ON p.id = ps.property_id
+            JOIN latest_snapshots ls ON ps.property_id = ls.property_id AND ps.collected_at = ls.max_date
             WHERE p.is_active = 1
               AND p.geography IS NOT NULL
               AND julianday('now') - julianday(p.first_seen) <= :days
@@ -71,7 +88,7 @@ class InvestorAnalyzer:
             ORDER BY new_listings DESC
             LIMIT 20
         """
-        
+
         return pd.read_sql(query, self.session.bind, params={"days": hours/24})
     
     # ==================== INVESTMENT CALCULATOR ====================
@@ -155,14 +172,14 @@ class InvestorAnalyzer:
         # Athens: 3-5% gross yield
         # Thessaloniki: 4-6%
         # Islands: 5-8% (seasonal)
-        
+
         property_value = price_per_sqm * sq_meters
-        
+
         # Conservative estimate: 4% gross yield
         low_yield = 0.03
         mid_yield = 0.04
         high_yield = 0.05
-        
+
         return {
             "estimated_value": property_value,
             "monthly_rent_low": (property_value * low_yield) / 12,
@@ -174,6 +191,231 @@ class InvestorAnalyzer:
             "yield_assumption_low": low_yield * 100,
             "yield_assumption_mid": mid_yield * 100,
             "yield_assumption_high": high_yield * 100,
+        }
+
+    def get_rental_yield_analysis(self, min_listings: int = 5) -> pd.DataFrame:
+        """
+        Analyze estimated rental yields by area based on market data.
+
+        Uses price-to-rent ratios and market indicators to estimate yields.
+
+        Returns:
+            DataFrame with area yield estimates and investment metrics
+        """
+        # Get area statistics for yield estimation
+        query = """
+            WITH latest_snapshots AS (
+                SELECT property_id, MAX(collected_at) as max_date
+                FROM property_snapshots
+                GROUP BY property_id
+            )
+            SELECT
+                p.geography,
+                COUNT(DISTINCT p.id) as listing_count,
+                AVG(ps.price) as avg_price,
+                AVG(ps.price_per_sqm) as avg_price_sqm,
+                AVG(p.sq_meters) as avg_size,
+                AVG(julianday('now') - julianday(p.first_seen)) as avg_dom,
+                SUM(CASE WHEN ps.price_reduced = 1 THEN 1 ELSE 0 END) as reduced_count
+            FROM properties p
+            JOIN property_snapshots ps ON p.id = ps.property_id
+            JOIN latest_snapshots ls ON ps.property_id = ls.property_id AND ps.collected_at = ls.max_date
+            WHERE p.is_active = 1
+              AND p.geography IS NOT NULL
+              AND ps.price_per_sqm IS NOT NULL
+            GROUP BY p.geography
+            HAVING COUNT(DISTINCT p.id) >= :min_listings
+        """
+
+        df = pd.read_sql(query, self.session.bind, params={"min_listings": min_listings})
+
+        if df.empty:
+            return df
+
+        # Calculate estimated yields based on market factors
+        # Higher yield estimates for:
+        # - Areas with higher DOM (more supply, landlord-friendly)
+        # - Areas with more price reductions (negotiable)
+        # - Lower price per sqm areas (better value)
+
+        # Base yield assumptions for Athens region
+        base_yield = 0.04  # 4% base gross yield
+
+        # Price factor: cheaper areas have higher yields
+        price_max = df["avg_price_sqm"].max()
+        price_min = df["avg_price_sqm"].min()
+        if price_max > price_min:
+            df["price_factor"] = 1 + ((price_max - df["avg_price_sqm"]) / (price_max - price_min) * 0.02)
+        else:
+            df["price_factor"] = 1.0
+
+        # Market factor: areas with higher DOM suggest rental-friendly
+        dom_avg = df["avg_dom"].mean()
+        df["market_factor"] = 1 + ((df["avg_dom"] - dom_avg) / 100).clip(-0.01, 0.01)
+
+        # Calculate estimated gross yield
+        df["estimated_gross_yield"] = (base_yield * df["price_factor"] * df["market_factor"] * 100).round(2)
+        df["estimated_gross_yield"] = df["estimated_gross_yield"].clip(2.5, 7.0)
+
+        # Calculate estimated monthly rent
+        df["estimated_monthly_rent"] = (
+            df["avg_price"] * (df["estimated_gross_yield"] / 100) / 12
+        ).round(0)
+
+        # Calculate rent per sqm
+        df["estimated_rent_per_sqm"] = (
+            df["estimated_monthly_rent"] / df["avg_size"]
+        ).round(1)
+
+        # Net yield (assuming 25% expenses)
+        df["estimated_net_yield"] = (df["estimated_gross_yield"] * 0.75).round(2)
+
+        # GRM (Gross Rent Multiplier)
+        df["grm_years"] = (df["avg_price"] / (df["estimated_monthly_rent"] * 12)).round(1)
+
+        # Investment rating based on yield
+        df["investment_rating"] = pd.cut(
+            df["estimated_net_yield"],
+            bins=[0, 2.5, 3.5, 4.5, 10],
+            labels=["Low Yield", "Moderate", "Good", "Excellent"]
+        )
+
+        return df.sort_values("estimated_gross_yield", ascending=False)
+
+    def calculate_rental_property_roi(
+        self,
+        property_id: int = None,
+        price: float = None,
+        sq_meters: float = None,
+        area: str = None,
+        monthly_rent: float = None,
+    ) -> Dict:
+        """
+        Calculate comprehensive ROI for a rental property.
+
+        Can use either a property ID to look up details, or manual inputs.
+
+        Returns:
+            Dict with comprehensive investment analysis
+        """
+        # If property_id provided, look up details
+        if property_id:
+            query = """
+                WITH latest_snapshots AS (
+                    SELECT property_id, MAX(collected_at) as max_date
+                    FROM property_snapshots
+                    GROUP BY property_id
+                )
+                SELECT
+                    p.id, p.geography, p.sq_meters, ps.price, ps.price_per_sqm
+                FROM properties p
+                JOIN property_snapshots ps ON p.id = ps.property_id
+                JOIN latest_snapshots ls ON ps.property_id = ls.property_id AND ps.collected_at = ls.max_date
+                WHERE p.id = :property_id
+            """
+            result = pd.read_sql(query, self.session.bind, params={"property_id": property_id})
+
+            if result.empty:
+                return {"error": "Property not found"}
+
+            prop = result.iloc[0]
+            price = prop["price"]
+            sq_meters = prop["sq_meters"]
+            area = prop["geography"]
+
+        if not all([price, sq_meters]):
+            return {"error": "Missing required inputs (price, sq_meters)"}
+
+        # Estimate rent if not provided
+        if not monthly_rent:
+            # Use area analysis to estimate yield
+            yield_analysis = self.get_rental_yield_analysis(min_listings=3)
+
+            if not yield_analysis.empty and area:
+                area_data = yield_analysis[yield_analysis["geography"].str.contains(area, case=False, na=False)]
+                if not area_data.empty:
+                    estimated_yield = area_data.iloc[0]["estimated_gross_yield"] / 100
+                else:
+                    estimated_yield = 0.04  # Default 4%
+            else:
+                estimated_yield = 0.04
+
+            monthly_rent = (price * estimated_yield) / 12
+        else:
+            estimated_yield = (monthly_rent * 12) / price
+
+        # Calculate all metrics
+        annual_rent = monthly_rent * 12
+        gross_yield = (annual_rent / price) * 100
+
+        # Expense assumptions
+        vacancy_rate = 0.05  # 5% vacancy
+        management_fee = 0.08  # 8% property management
+        maintenance = 0.01  # 1% of value for maintenance
+        insurance = 0.002  # 0.2% of value
+        property_tax = 0.01  # 1% ENFIA
+
+        annual_expenses = (
+            annual_rent * vacancy_rate +
+            annual_rent * management_fee +
+            price * maintenance +
+            price * insurance +
+            price * property_tax
+        )
+
+        noi = annual_rent - annual_expenses
+        net_yield = (noi / price) * 100
+
+        # Financing scenarios
+        scenarios = {}
+        for dp_pct in [20, 30, 50, 100]:
+            dp = price * (dp_pct / 100)
+            loan = price - dp
+
+            if loan > 0:
+                rate = 0.045  # 4.5% interest
+                term = 25 * 12
+                monthly_rate = rate / 12
+                mortgage = loan * (monthly_rate * (1 + monthly_rate)**term) / ((1 + monthly_rate)**term - 1)
+                annual_mortgage = mortgage * 12
+            else:
+                mortgage = 0
+                annual_mortgage = 0
+
+            annual_cashflow = noi - annual_mortgage
+            coc = (annual_cashflow / dp) * 100 if dp > 0 else 0
+
+            scenarios[f"{dp_pct}pct_down"] = {
+                "down_payment": dp,
+                "loan_amount": loan,
+                "monthly_mortgage": mortgage,
+                "annual_cashflow": annual_cashflow,
+                "monthly_cashflow": annual_cashflow / 12,
+                "cash_on_cash": coc,
+            }
+
+        return {
+            "property_id": property_id,
+            "area": area,
+            "price": price,
+            "sq_meters": sq_meters,
+            "price_per_sqm": price / sq_meters if sq_meters else 0,
+            "estimated_monthly_rent": monthly_rent,
+            "annual_rent": annual_rent,
+            "gross_yield": gross_yield,
+            "annual_expenses": annual_expenses,
+            "noi": noi,
+            "net_yield": net_yield,
+            "cap_rate": net_yield,  # Cap rate = net yield for all-cash
+            "grm": price / annual_rent if annual_rent > 0 else 0,
+            "financing_scenarios": scenarios,
+            "expense_breakdown": {
+                "vacancy": annual_rent * vacancy_rate,
+                "management": annual_rent * management_fee,
+                "maintenance": price * maintenance,
+                "insurance": price * insurance,
+                "property_tax": price * property_tax,
+            }
         }
     
     # ==================== APPRECIATION RADAR ====================
