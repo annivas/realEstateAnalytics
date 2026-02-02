@@ -190,14 +190,14 @@ class CollectionRun(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     started_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
-    
+
     # Stats
     areas_collected = Column(Integer, default=0)
     properties_found = Column(Integer, default=0)
     new_properties = Column(Integer, default=0)
     updated_properties = Column(Integer, default=0)
     price_changes_detected = Column(Integer, default=0)
-    
+
     # Status
     status = Column(String(50), default="running")  # running, completed, failed
     error_message = Column(Text, nullable=True)
@@ -207,6 +207,62 @@ class CollectionRun(Base):
 
     def __repr__(self):
         return f"<CollectionRun(id={self.id}, status='{self.status}', properties={self.properties_found})>"
+
+
+class WatchlistItem(Base):
+    """User watchlist for tracking specific properties."""
+    __tablename__ = "watchlist"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    property_id = Column(Integer, ForeignKey("properties.id"), nullable=False)
+    notes = Column(Text, nullable=True)
+    target_price = Column(Integer, nullable=True)  # Alert if price drops to this
+    added_at = Column(DateTime, default=datetime.utcnow)
+    last_notified_at = Column(DateTime, nullable=True)
+
+    # Relationships
+    property = relationship("Property")
+
+    # Indexes
+    __table_args__ = (
+        Index("idx_watchlist_property", "property_id"),
+    )
+
+    def __repr__(self):
+        return f"<WatchlistItem(property_id={self.property_id}, added_at={self.added_at})>"
+
+
+class Alert(Base):
+    """User alerts for market conditions and property changes."""
+    __tablename__ = "alerts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    alert_type = Column(String(50), nullable=False)  # price_drop, new_listing, market_change
+    criteria = Column(Text, nullable=True)  # JSON string with alert criteria
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_triggered_at = Column(DateTime, nullable=True)
+
+    def __repr__(self):
+        return f"<Alert(type={self.alert_type}, active={self.is_active})>"
+
+
+class AlertHistory(Base):
+    """History of triggered alerts."""
+    __tablename__ = "alert_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    alert_id = Column(Integer, ForeignKey("alerts.id"), nullable=False)
+    property_id = Column(Integer, ForeignKey("properties.id"), nullable=True)
+    message = Column(Text, nullable=False)
+    triggered_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    alert = relationship("Alert")
+    property = relationship("Property")
+
+    def __repr__(self):
+        return f"<AlertHistory(alert_id={self.alert_id}, triggered_at={self.triggered_at})>"
 
 
 # Database connection utilities
@@ -228,6 +284,34 @@ def get_session() -> Session:
     if _SessionLocal is None:
         _SessionLocal = sessionmaker(bind=get_engine())
     return _SessionLocal()
+
+
+def get_latest_snapshot_subquery(session: Session):
+    """
+    Returns a subquery for joining to get only the latest snapshot per property.
+
+    This is a common pattern used across analytics modules to avoid counting
+    properties multiple times when they have multiple snapshots.
+
+    Usage:
+        latest_subq = get_latest_snapshot_subquery(session)
+        query = (
+            session.query(Property, PropertySnapshot)
+            .join(PropertySnapshot)
+            .join(latest_subq,
+                  (PropertySnapshot.property_id == latest_subq.c.property_id) &
+                  (PropertySnapshot.collected_at == latest_subq.c.max_date))
+        )
+    """
+    from sqlalchemy import func
+    return (
+        session.query(
+            PropertySnapshot.property_id,
+            func.max(PropertySnapshot.collected_at).label("max_date")
+        )
+        .group_by(PropertySnapshot.property_id)
+        .subquery()
+    )
 
 
 def init_db():

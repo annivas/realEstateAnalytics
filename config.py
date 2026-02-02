@@ -26,12 +26,25 @@ DEFAULT_SORT_ORDER = "desc"
 DEFAULT_PAGE_SIZE = 100  # Number of results per page
 
 # Areas to monitor (area IDs from spitogatos.gr)
-# 105103 is a larger area covering more of Athens
+# Each area may contain micro-locations (e.g., Neo Psychiko includes Agios Georgios, Agia Sofia)
 MONITORED_AREAS = {
-    105103: "Athens Region",
-    # Smaller area examples:
-    # 2121: "Filothei",
-    # 2124: "Psychiko",
+    2106: "Ekali",
+    2107: "Kifisia",
+    2111: "Marousi",
+    2122: "Chalandri",
+    6135: "Nea Filothei",
+    2121: "Filothei",
+    2124: "Psychiko",
+    2115: "Neo Psychiko",
+    660218: "Ampelokipoi",
+    6009: "Kolonaki",
+    6013: "Pagkrati",
+    6011: "Koukaki",
+    6007: "Exarxia",
+    2210: "Elliniko",
+    2205: "Voula",
+    2206: "Vouliagmeni",
+    2208: "Glyfada",
 }
 
 # Rate limiting

@@ -136,10 +136,12 @@ class PriceTrendsAnalyzer:
         trends = recent_avg.join(older_avg, how="outer").reset_index()
         trends = trends[trends["current_count"] >= min_listings]
         
-        # Calculate change
-        trends["change_pct"] = (
-            (trends["current_avg"] - trends["previous_avg"]) / trends["previous_avg"] * 100
-        ).round(2)
+        # Calculate change (with safe division to avoid division by zero)
+        trends["change_pct"] = np.where(
+            (trends["previous_avg"].notna()) & (trends["previous_avg"] > 0),
+            ((trends["current_avg"] - trends["previous_avg"]) / trends["previous_avg"] * 100).round(2),
+            np.nan
+        )
         
         trends = trends.sort_values("change_pct", ascending=False)
         

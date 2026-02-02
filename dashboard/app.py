@@ -3,6 +3,7 @@ Real Estate Analytics Dashboard - Main Streamlit Application
 """
 import streamlit as st
 import pandas as pd
+import io
 from datetime import datetime, timedelta, timezone
 
 import sys
@@ -17,6 +18,78 @@ data_dir = project_root / "data"
 data_dir.mkdir(exist_ok=True)
 
 from database.models import init_db, get_session, Property, PropertySnapshot, CollectionRun
+
+
+# ==================== CACHING UTILITIES ====================
+
+@st.cache_data(ttl=3600)  # Cache for 1 hour
+def get_cached_area_summary(min_listings: int = 3):
+    """Cached version of area summary to improve performance."""
+    from analytics.area_analysis import AreaAnalyzer
+    with AreaAnalyzer() as analyzer:
+        return analyzer.get_area_summary(min_listings=min_listings)
+
+
+@st.cache_data(ttl=1800)  # Cache for 30 minutes
+def get_cached_price_trends(days: int = 90, area_filter: str = None, resample: str = "W"):
+    """Cached version of price trends."""
+    from analytics.price_trends import PriceTrendsAnalyzer
+    with PriceTrendsAnalyzer() as analyzer:
+        return analyzer.get_price_per_sqm_trends(days=days, area_filter=area_filter, resample=resample)
+
+
+@st.cache_data(ttl=1800)  # Cache for 30 minutes
+def get_cached_market_signals():
+    """Cached version of market timing signals."""
+    from analytics.investor_tools import InvestorAnalyzer
+    with InvestorAnalyzer() as analyzer:
+        return analyzer.get_market_timing_signals()
+
+
+def export_dataframe_to_csv(df: pd.DataFrame, filename: str):
+    """Helper function to create a CSV download button for a dataframe."""
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="Download CSV",
+        data=csv,
+        file_name=filename,
+        mime="text/csv",
+        key=f"download_{filename}"
+    )
+
+
+def render_collection_status_widget():
+    """Render a compact collection status widget."""
+    session = get_session()
+    try:
+        last_run = (
+            session.query(CollectionRun)
+            .order_by(CollectionRun.started_at.desc())
+            .first()
+        )
+
+        if last_run:
+            status_emoji = "✅" if last_run.status == "completed" else ("⏳" if last_run.status == "running" else "❌")
+            status_color = "green" if last_run.status == "completed" else ("orange" if last_run.status == "running" else "red")
+
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Collection Status", f"{status_emoji} {last_run.status.title()}")
+            with col2:
+                if last_run.completed_at:
+                    time_ago = datetime.utcnow() - last_run.completed_at
+                    hours_ago = time_ago.total_seconds() / 3600
+                    st.metric("Last Updated", f"{hours_ago:.1f}h ago")
+                else:
+                    st.metric("Last Updated", "In Progress")
+            with col3:
+                st.metric("Properties Found", f"{last_run.properties_found:,}" if last_run.properties_found else "0")
+            with col4:
+                st.metric("New Properties", f"{last_run.new_properties:,}" if last_run.new_properties else "0")
+        else:
+            st.warning("No data collection runs found. Run the collector to gather data.")
+    finally:
+        session.close()
 from analytics.price_trends import PriceTrendsAnalyzer
 from analytics.inventory import InventoryAnalyzer
 from analytics.price_reductions import PriceReductionAnalyzer
@@ -104,33 +177,41 @@ def render_sidebar():
     """Render the sidebar with navigation and filters."""
     st.sidebar.title("Real Estate Analytics")
     st.sidebar.markdown("---")
-    
+
     # Quick stats
     stats = get_quick_stats()
     st.sidebar.metric("Total Listings", f"{stats['total_properties']:,}")
     st.sidebar.metric("New This Week", f"{stats['new_this_week']:,}")
-    
+
     if stats["last_collection"]:
-        st.sidebar.caption(f"Last updated: {stats['last_collection'].strftime('%Y-%m-%d %H:%M')}")
+        time_ago = datetime.utcnow() - stats["last_collection"]
+        hours_ago = time_ago.total_seconds() / 3600
+        if hours_ago < 1:
+            time_str = f"{int(time_ago.total_seconds() / 60)}m ago"
+        elif hours_ago < 24:
+            time_str = f"{hours_ago:.1f}h ago"
+        else:
+            time_str = stats['last_collection'].strftime('%Y-%m-%d %H:%M')
+        st.sidebar.caption(f"Last updated: {time_str}")
     else:
         st.sidebar.caption("No data collected yet")
-    
+
     st.sidebar.markdown("---")
-    
+
     # Navigation
     page = st.sidebar.radio(
         "Navigate",
-        ["Investor Dashboard", "Deal Finder", "Market History", "Market Intelligence", "Property Insights", "Area Analysis", "Agent Insights", "Data Collection"],
+        ["Investor Dashboard", "Deal Finder", "Market History", "Market Intelligence", "Property Insights", "Area Analysis", "Agent Insights", "Watchlist", "Data Collection"],
         label_visibility="collapsed",
     )
-    
+
     st.sidebar.markdown("---")
-    
+
     # Monitored areas
     st.sidebar.subheader("Monitored Areas")
     for area_id, area_name in MONITORED_AREAS.items():
         st.sidebar.text(f"• {area_name}")
-    
+
     return page
 
 
@@ -1790,15 +1871,183 @@ def render_property_insights_page():
             st.info("No stale listings found (all properties listed < 60 days).")
 
 
+def render_watchlist_page():
+    """Render the watchlist management page."""
+    st.title("Watchlist")
+    st.markdown("Track properties and get alerts on price changes")
+
+    from analytics.watchlist import WatchlistAnalyzer
+    from analytics.price_prediction import PricePredictionAnalyzer
+
+    with WatchlistAnalyzer() as analyzer:
+        # Summary metrics
+        summary = analyzer.get_watchlist_summary()
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Watched Properties", summary.get("total_items", 0))
+        with col2:
+            st.metric("Active", summary.get("active_properties", 0))
+        with col3:
+            st.metric("Price Reductions", summary.get("price_reductions", 0))
+        with col4:
+            total_value = summary.get("total_value", 0)
+            st.metric("Total Value", f"€{total_value:,.0f}" if total_value else "€0")
+
+        st.markdown("---")
+
+        # Add to watchlist section
+        with st.expander("Add Property to Watchlist", expanded=False):
+            col1, col2 = st.columns(2)
+            with col1:
+                property_id = st.number_input("Property ID", min_value=1, step=1)
+                notes = st.text_area("Notes (optional)", placeholder="e.g., Good location, needs renovation")
+            with col2:
+                target_price = st.number_input("Target Price (optional)", min_value=0, step=1000,
+                                               help="Get alerted when price drops to this level")
+
+            if st.button("Add to Watchlist", type="primary"):
+                success = analyzer.add_to_watchlist(
+                    property_id=int(property_id),
+                    notes=notes if notes else None,
+                    target_price=int(target_price) if target_price > 0 else None
+                )
+                if success:
+                    st.success(f"Property {property_id} added to watchlist!")
+                    st.rerun()
+                else:
+                    st.error("Could not add property. It may already be in your watchlist or doesn't exist.")
+
+        # Alerts section
+        alerts = analyzer.get_watchlist_alerts()
+        if alerts:
+            st.subheader("Alerts")
+            for alert in alerts:
+                if alert["priority"] == "high":
+                    st.error(f"**{alert['geography']}**: {alert['message']}")
+                else:
+                    st.warning(f"**{alert['geography']}**: {alert['message']}")
+
+        st.markdown("---")
+
+        # Watchlist table
+        st.subheader("Your Watchlist")
+
+        watchlist = analyzer.get_watchlist()
+
+        if watchlist.empty:
+            st.info("Your watchlist is empty. Add properties to track them.")
+        else:
+            # Display watchlist
+            display_df = watchlist[[
+                "property_id", "geography", "category", "sq_meters",
+                "current_price", "price_per_sqm", "target_price",
+                "days_on_market", "price_reduced", "is_active", "notes"
+            ]].copy()
+
+            display_df["current_price"] = display_df["current_price"].apply(
+                lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A"
+            )
+            display_df["price_per_sqm"] = display_df["price_per_sqm"].apply(
+                lambda x: f"€{x:,.0f}" if pd.notna(x) else "N/A"
+            )
+            display_df["target_price"] = display_df["target_price"].apply(
+                lambda x: f"€{x:,.0f}" if pd.notna(x) and x > 0 else "-"
+            )
+            display_df["status"] = display_df.apply(
+                lambda r: "Reduced" if r["price_reduced"] else ("Sold?" if not r["is_active"] else "Active"),
+                axis=1
+            )
+            display_df["link"] = display_df["property_id"].apply(
+                lambda x: f"https://www.spitogatos.gr/aggelia/{x}"
+            )
+
+            display_df = display_df[[
+                "property_id", "link", "geography", "category", "sq_meters",
+                "current_price", "price_per_sqm", "target_price",
+                "days_on_market", "status", "notes"
+            ]]
+            display_df.columns = [
+                "ID", "Link", "Area", "Type", "Size", "Price", "€/sqm",
+                "Target", "DOM", "Status", "Notes"
+            ]
+
+            st.dataframe(
+                display_df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Link": st.column_config.LinkColumn("Link", display_text="View")
+                }
+            )
+
+            # Export button
+            export_dataframe_to_csv(watchlist, "watchlist_export.csv")
+
+            # Remove from watchlist
+            st.markdown("---")
+            st.subheader("Remove from Watchlist")
+            remove_id = st.selectbox(
+                "Select property to remove",
+                options=watchlist["property_id"].tolist(),
+                format_func=lambda x: f"ID {x} - {watchlist[watchlist['property_id']==x]['geography'].values[0]}"
+            )
+            if st.button("Remove Selected", type="secondary"):
+                if analyzer.remove_from_watchlist(remove_id):
+                    st.success(f"Property {remove_id} removed from watchlist")
+                    st.rerun()
+
+            # Price history for selected property
+            st.markdown("---")
+            st.subheader("Price History")
+            selected_property = st.selectbox(
+                "Select property to view history",
+                options=watchlist["property_id"].tolist(),
+                format_func=lambda x: f"ID {x} - {watchlist[watchlist['property_id']==x]['geography'].values[0]}",
+                key="history_select"
+            )
+
+            if selected_property:
+                history = analyzer.get_property_price_history(selected_property)
+                if not history.empty:
+                    import plotly.express as px
+
+                    fig = px.line(
+                        history,
+                        x="date",
+                        y="price",
+                        title=f"Price History for Property {selected_property}",
+                        markers=True
+                    )
+                    fig.update_layout(
+                        xaxis_title="Date",
+                        yaxis_title="Price (€)",
+                        yaxis_tickformat="€,.0f"
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+                    # Price changes table
+                    changes = history[history["price_change"].notna() & (history["price_change"] != 0)]
+                    if not changes.empty:
+                        st.markdown("**Price Changes:**")
+                        for _, row in changes.iterrows():
+                            change = row["price_change"]
+                            pct = row["price_change_pct"]
+                            emoji = "📉" if change < 0 else "📈"
+                            st.write(f"{emoji} {row['date'].strftime('%Y-%m-%d')}: €{change:+,.0f} ({pct:+.1f}%)")
+                else:
+                    st.info("No price history available for this property.")
+
+
 def main():
     """Main application entry point."""
     try:
         # Initialize database
         init_db()
-        
+
         # Render sidebar and get selected page
         page = render_sidebar()
-        
+
         # Render selected page
         if page == "Investor Dashboard":
             render_investor_dashboard()
@@ -1814,6 +2063,8 @@ def main():
             render_area_analysis_page()
         elif page == "Agent Insights":
             render_agent_insights_page()
+        elif page == "Watchlist":
+            render_watchlist_page()
         elif page == "Data Collection":
             render_data_collection_page()
     except Exception as e:
