@@ -21,9 +21,14 @@ except ImportError:
     import urllib.request
     USE_HTTPX = False
 
+# Import monitored areas from config
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from config import MONITORED_AREAS
+
 # Configuration
 API_URL = "https://www.spitogatos.gr/n_api/v1/properties/search-results-map"
-AREA_IDS = [105103]  # Athens Region
+AREA_IDS = list(MONITORED_AREAS.keys())  # Get area IDs from config
 MAX_RESULTS = 10000  # Target more properties
 MIN_RESPONSE_SIZE = 5000  # Responses smaller than this are likely blocked
 MAX_RETRIES = 5  # More retries
