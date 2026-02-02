@@ -4,6 +4,7 @@ Listing page scraper using Playwright.
 Scrapes additional property details from individual listing pages that
 aren't available through the API.
 """
+import json
 import random
 import re
 import time
@@ -42,13 +43,34 @@ class ListingScraper:
     def __enter__(self):
         """Context manager entry - start browser."""
         self.playwright = sync_playwright().start()
-        self.browser = self.playwright.chromium.launch(
-            headless=self.headless,
-            args=[
+
+        # Try to find a working chromium executable
+        import os
+        chromium_path = None
+        playwright_cache = os.path.expanduser("~/.cache/ms-playwright")
+        if os.path.exists(playwright_cache):
+            for entry in os.listdir(playwright_cache):
+                if entry.startswith("chromium-"):
+                    potential_path = os.path.join(
+                        playwright_cache, entry, "chrome-linux", "chrome"
+                    )
+                    if os.path.exists(potential_path):
+                        chromium_path = potential_path
+                        break
+
+        launch_args = {
+            "headless": self.headless,
+            "args": [
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
+                "--disable-dev-shm-usage",
             ]
-        )
+        }
+
+        if chromium_path:
+            launch_args["executable_path"] = chromium_path
+
+        self.browser = self.playwright.chromium.launch(**launch_args)
         # Create a context with realistic settings
         context = self.browser.new_context(
             viewport={"width": 1920, "height": 1080},
@@ -131,10 +153,93 @@ class ListingScraper:
         """Extract all available data from the listing page."""
         data = {}
 
-        # Extract using various strategies
+        # Try to extract JSON-LD structured data first (most reliable)
+        data.update(self._extract_json_ld())
+
+        # Extract using various strategies (fills in gaps)
         data.update(self._extract_property_details())
         data.update(self._extract_features())
         data.update(self._extract_energy_info())
+        data.update(self._extract_additional_details())
+
+        return data
+
+    def _extract_json_ld(self) -> Dict[str, Any]:
+        """Extract structured data from JSON-LD script tags."""
+        data = {}
+
+        try:
+            # Find all JSON-LD script tags
+            scripts = self.page.query_selector_all('script[type="application/ld+json"]')
+
+            for script in scripts:
+                try:
+                    json_text = script.inner_text()
+                    json_data = json.loads(json_text)
+
+                    # Handle both single objects and arrays
+                    items = json_data if isinstance(json_data, list) else [json_data]
+
+                    for item in items:
+                        item_type = item.get("@type", "")
+
+                        # RealEstateListing or Product type
+                        if item_type in ["RealEstateListing", "Product", "Residence", "House", "Apartment"]:
+                            # Extract year built
+                            if "yearBuilt" in item:
+                                data["construction_year"] = int(item["yearBuilt"])
+
+                            # Extract floor area
+                            if "floorSize" in item:
+                                floor_size = item["floorSize"]
+                                if isinstance(floor_size, dict):
+                                    data["floor_size_value"] = floor_size.get("value")
+
+                            # Extract number of rooms
+                            if "numberOfRooms" in item:
+                                data["num_rooms"] = int(item["numberOfRooms"])
+
+                            # Extract address details
+                            if "address" in item:
+                                addr = item["address"]
+                                if isinstance(addr, dict):
+                                    if "postalCode" in addr:
+                                        data["postal_code"] = addr["postalCode"]
+                                    if "streetAddress" in addr:
+                                        data["street_address"] = addr["streetAddress"]
+
+                            # Extract geo coordinates
+                            if "geo" in item:
+                                geo = item["geo"]
+                                if isinstance(geo, dict):
+                                    if "latitude" in geo:
+                                        data["latitude"] = float(geo["latitude"])
+                                    if "longitude" in geo:
+                                        data["longitude"] = float(geo["longitude"])
+
+                            # Extract amenities
+                            if "amenityFeature" in item:
+                                amenities = item["amenityFeature"]
+                                if isinstance(amenities, list):
+                                    for amenity in amenities:
+                                        name = amenity.get("name", "").lower()
+                                        value = amenity.get("value", True)
+                                        if "parking" in name or "garage" in name:
+                                            data["has_parking"] = bool(value)
+                                        elif "pool" in name or "πισίνα" in name:
+                                            data["has_pool"] = bool(value)
+                                        elif "garden" in name or "κήπος" in name:
+                                            data["has_garden"] = bool(value)
+                                        elif "elevator" in name or "ασανσέρ" in name:
+                                            data["has_elevator"] = bool(value)
+                                        elif "air" in name or "κλιματισμ" in name:
+                                            data["has_air_conditioning"] = bool(value)
+
+                except (json.JSONDecodeError, KeyError, TypeError):
+                    continue
+
+        except Exception as e:
+            print(f"Error extracting JSON-LD: {e}")
 
         return data
 
@@ -279,6 +384,113 @@ class ListingScraper:
             print(f"Error extracting energy info: {e}")
 
         return info
+
+    def _extract_additional_details(self) -> Dict[str, Any]:
+        """Extract additional property details using CSS selectors and data attributes."""
+        details = {}
+
+        try:
+            content = self.page.content()
+
+            # Try to extract from data attributes or specific HTML patterns
+            # Floor level
+            floor_patterns = [
+                r'(?:Όροφος|Floor)[:\s]*(\d+)',
+                r'floor[:\s]*(\d+)',
+            ]
+            for pattern in floor_patterns:
+                match = re.search(pattern, content, re.IGNORECASE)
+                if match:
+                    floor = int(match.group(1))
+                    if 0 <= floor <= 50:  # Sanity check
+                        details["floor_level"] = floor
+                    break
+
+            # Total floors in building
+            total_floors_patterns = [
+                r'(?:Συνολικοί όροφοι|Total floors)[:\s]*(\d+)',
+                r'(?:από|of)\s*(\d+)\s*(?:ορόφους|floors)',
+            ]
+            for pattern in total_floors_patterns:
+                match = re.search(pattern, content, re.IGNORECASE)
+                if match:
+                    total = int(match.group(1))
+                    if 1 <= total <= 50:
+                        details["total_floors"] = total
+                    break
+
+            # Renovation year
+            renovation_patterns = [
+                r'(?:Ανακαίνιση|Renovated|Renovation)[:\s]*(\d{4})',
+                r'(?:ανακαινίστηκε το|renovated in)\s*(\d{4})',
+            ]
+            for pattern in renovation_patterns:
+                match = re.search(pattern, content, re.IGNORECASE)
+                if match:
+                    year = int(match.group(1))
+                    if 1900 <= year <= 2030:
+                        details["renovation_year"] = year
+                    break
+
+            # Distance to sea/beach
+            sea_distance_patterns = [
+                r'(?:Απόσταση από θάλασσα|Distance to sea)[:\s]*(\d+)\s*(?:μ\.|m|μέτρα|meters)',
+                r'(\d+)\s*(?:μ\.|m)\s*(?:από|from)\s*(?:θάλασσα|sea|beach)',
+            ]
+            for pattern in sea_distance_patterns:
+                match = re.search(pattern, content, re.IGNORECASE)
+                if match:
+                    distance = int(match.group(1))
+                    if 0 <= distance <= 50000:
+                        details["distance_to_sea_m"] = distance
+                    break
+
+            # Furnished status
+            if re.search(r'(?:επιπλωμένο|furnished)', content, re.IGNORECASE):
+                details["is_furnished"] = True
+            elif re.search(r'(?:μη επιπλωμένο|unfurnished)', content, re.IGNORECASE):
+                details["is_furnished"] = False
+
+            # Pet friendly
+            if re.search(r'(?:κατοικίδια δεκτά|pets allowed|pet friendly)', content, re.IGNORECASE):
+                details["pets_allowed"] = True
+
+            # Corner property
+            if re.search(r'(?:γωνιακό|corner)', content, re.IGNORECASE):
+                details["is_corner"] = True
+
+            # Bright/luminous
+            if re.search(r'(?:φωτεινό|bright|luminous)', content, re.IGNORECASE):
+                details["is_bright"] = True
+
+            # Double glazing
+            if re.search(r'(?:διπλά τζάμια|double glaz)', content, re.IGNORECASE):
+                details["has_double_glazing"] = True
+
+            # Night power
+            if re.search(r'(?:νυχτερινό ρεύμα|night power)', content, re.IGNORECASE):
+                details["has_night_power"] = True
+
+            # Suitable for professional use
+            if re.search(r'(?:κατάλληλο για επαγγελματική χρήση|suitable for professional use)', content, re.IGNORECASE):
+                details["suitable_for_professional_use"] = True
+
+            # Try to extract agent/agency name
+            agency_patterns = [
+                r'(?:Μεσιτικό γραφείο|Agency|Real Estate)[:\s]*([^<\n]{3,50})',
+            ]
+            for pattern in agency_patterns:
+                match = re.search(pattern, content, re.IGNORECASE)
+                if match:
+                    agency = match.group(1).strip()
+                    if len(agency) >= 3 and len(agency) <= 100:
+                        details["agency_name"] = agency
+                    break
+
+        except Exception as e:
+            print(f"Error extracting additional details: {e}")
+
+        return details
 
     def scrape_multiple(self, property_ids: List[int],
                        progress_callback=None) -> Dict[int, Dict[str, Any]]:
