@@ -89,6 +89,28 @@ class Property(Base):
     new_development = Column(Boolean, default=False)
     has_virtual_tour = Column(Boolean, default=False)
     has_video = Column(Boolean, default=False)
+
+    # Scraped details (from listing page)
+    construction_year = Column(Integer, nullable=True)
+    energy_class = Column(String(10), nullable=True)  # A+, A, B, C, D, E, F, G
+    heating_type = Column(String(100), nullable=True)  # e.g., "Natural Gas", "Oil", "Electric"
+    has_parking = Column(Boolean, nullable=True)
+    parking_spots = Column(Integer, nullable=True)
+    has_elevator = Column(Boolean, nullable=True)
+    has_storage = Column(Boolean, nullable=True)
+    has_garden = Column(Boolean, nullable=True)
+    garden_sqm = Column(Integer, nullable=True)
+    has_pool = Column(Boolean, nullable=True)
+    has_air_conditioning = Column(Boolean, nullable=True)
+    has_fireplace = Column(Boolean, nullable=True)
+    has_alarm = Column(Boolean, nullable=True)
+    has_solar_water_heater = Column(Boolean, nullable=True)
+    orientation = Column(String(50), nullable=True)  # e.g., "South", "North-East"
+    view_type = Column(String(100), nullable=True)  # e.g., "Sea View", "Mountain View"
+    condition = Column(String(50), nullable=True)  # e.g., "Renovated", "Good", "Needs Renovation"
+    plot_sqm = Column(Integer, nullable=True)  # For houses
+    balcony_sqm = Column(Integer, nullable=True)
+    details_scraped_at = Column(DateTime, nullable=True)  # When we last scraped details
     
     # Listing info
     ad_type = Column(String(50), nullable=True)  # vip, featured, standard
