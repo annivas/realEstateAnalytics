@@ -26,25 +26,21 @@ DEFAULT_SORT_ORDER = "desc"
 DEFAULT_PAGE_SIZE = 100  # Number of results per page
 
 # Areas to monitor (area IDs from spitogatos.gr)
-# Each location may contain micro-locations (e.g., Neo Psychiko: Agios Georgios, Agia Sofia)
+# Each area may contain micro-locations (e.g., Neo Psychiko includes Agios Georgios, Agia Sofia)
 MONITORED_AREAS = {
-    # Northern Suburbs
     2106: "Ekali",
     2107: "Kifisia",
     2111: "Marousi",
     2122: "Chalandri",
-    # Filothei-Psychiko Area
     6135: "Nea Filothei",
-    2121: "Filothei",           # Micro-locations: Drosopoulou, Ano Filothei
-    2124: "Psychiko",           # Micro-locations: Eukalipti, Agios Dimitrios, Kollegio
-    2115: "Neo Psychiko",       # Micro-locations: Agios Georgios, Agia Sofia
-    # Central Athens
+    2121: "Filothei",
+    2124: "Psychiko",
+    2115: "Neo Psychiko",
     660218: "Ampelokipoi",
     6009: "Kolonaki",
     6013: "Pagkrati",
     6011: "Koukaki",
     6007: "Exarxia",
-    # Southern Suburbs (Riviera)
     2210: "Elliniko",
     2205: "Voula",
     2206: "Vouliagmeni",
