@@ -29,7 +29,7 @@ from config import MONITORED_AREAS
 # Configuration
 API_URL = "https://www.spitogatos.gr/n_api/v1/properties/search-results-map"
 AREA_IDS = list(MONITORED_AREAS.keys())  # Get area IDs from config
-MAX_RESULTS = 10000  # Target more properties
+MAX_RESULTS = None  # No limit - collect all available data
 MIN_RESPONSE_SIZE = 5000  # Responses smaller than this are likely blocked
 MAX_RETRIES = 5  # More retries
 BASE_DELAY = 5.0  # Longer delay between requests to avoid rate limiting
@@ -322,7 +322,7 @@ def collect_data():
     print("=" * 60)
     print(f"📁 Database: {db_path}")
     print(f"🎯 Areas: {AREA_IDS}")
-    print(f"📦 Max results: {MAX_RESULTS:,}")
+    print(f"📦 Max results: {'unlimited' if MAX_RESULTS is None else f'{MAX_RESULTS:,}'}")
     print("=" * 60)
     
     conn = init_database(str(db_path))
@@ -352,9 +352,10 @@ def collect_data():
     seen_property_ids = set()
     consecutive_failures = 0
     max_consecutive_failures = 3
-    
+    api_total = None  # Track total available from API for proportional thresholds
+
     try:
-        while total_fetched < MAX_RESULTS:
+        while MAX_RESULTS is None or total_fetched < MAX_RESULTS:
             url = build_url(offset)
             print(f"\n📡 Fetching offset {offset}...")
             
@@ -386,8 +387,9 @@ def collect_data():
             count = data.get("count", 0)
             total = data.get("total", 0)
             clusters = data.get("data", {})
-            
+
             if offset == 0:
+                api_total = total  # Store for proportional removal threshold
                 print(f"  📊 Total available in API: {total:,}")
             
             if not clusters or count == 0:
@@ -491,11 +493,11 @@ def collect_data():
                     
                     batch_count += 1
                     total_fetched += 1
-                    
-                    if total_fetched >= MAX_RESULTS:
+
+                    if MAX_RESULTS is not None and total_fetched >= MAX_RESULTS:
                         break
-                
-                if total_fetched >= MAX_RESULTS:
+
+                if MAX_RESULTS is not None and total_fetched >= MAX_RESULTS:
                     break
             
             conn.commit()
@@ -528,14 +530,23 @@ def collect_data():
         not_seen = previously_active - seen_property_ids
         if not_seen:
             print(f"\n🔍 {len(not_seen)} properties not seen in this collection")
-            # Only mark as inactive if we collected a significant amount
-            if total_fetched >= 1000:
+            # Calculate proportional threshold: need at least 50% of API total or minimum 100
+            # This prevents false removals when collection fails early
+            if api_total and api_total > 0:
+                min_threshold = max(100, int(api_total * 0.5))
+            else:
+                min_threshold = 100  # Fallback if API total unknown
+            print(f"  📊 Removal threshold: {min_threshold:,} (50% of {api_total:,} available)" if api_total else f"  📊 Removal threshold: {min_threshold:,}")
+            # Only mark as inactive if we collected a significant portion
+            if total_fetched >= min_threshold:
                 cursor.execute(f"""
-                    UPDATE properties SET is_active = 0 
+                    UPDATE properties SET is_active = 0
                     WHERE id IN ({','.join('?' * len(not_seen))})
                 """, list(not_seen))
                 removed_properties = len(not_seen)
                 print(f"  📤 Marked {removed_properties} properties as inactive (likely sold)")
+            else:
+                print(f"  ⚠️  Skipping removal marking - only collected {total_fetched:,} of {min_threshold:,} threshold")
     
     # Complete the run
     cursor.execute("""
