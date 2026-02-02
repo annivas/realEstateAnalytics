@@ -14,17 +14,20 @@ from database.models import (
 
 class AdvancedInsightsAnalyzer:
     """Advanced market insights and analysis."""
-    
+
     def __init__(self):
-        self.session = None
-    
-    def __enter__(self):
         self.session = get_session()
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
+
+    def close(self):
+        """Close the database session."""
         if self.session:
             self.session.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
     
     # ==================== PRICE BENCHMARKS ====================
     
@@ -33,10 +36,16 @@ class AdvancedInsightsAnalyzer:
         Calculate price benchmarks (fair price range) for each area.
         Returns min, max, avg, median, and percentiles.
         """
+        # Use latest snapshot per property to avoid duplicate counting
         query = """
-            SELECT 
+            WITH latest_snapshots AS (
+                SELECT property_id, MAX(collected_at) as max_date
+                FROM property_snapshots
+                GROUP BY property_id
+            )
+            SELECT
                 p.geography,
-                COUNT(*) as listing_count,
+                COUNT(DISTINCT p.id) as listing_count,
                 AVG(ps.price_per_sqm) as avg_price_sqm,
                 MIN(ps.price_per_sqm) as min_price_sqm,
                 MAX(ps.price_per_sqm) as max_price_sqm,
@@ -44,11 +53,12 @@ class AdvancedInsightsAnalyzer:
                 AVG(p.sq_meters) as avg_size
             FROM properties p
             JOIN property_snapshots ps ON p.id = ps.property_id
-            WHERE p.is_active = 1 
+            JOIN latest_snapshots ls ON ps.property_id = ls.property_id AND ps.collected_at = ls.max_date
+            WHERE p.is_active = 1
               AND ps.price_per_sqm IS NOT NULL
               AND p.geography IS NOT NULL
             GROUP BY p.geography
-            HAVING COUNT(*) >= :min_listings
+            HAVING COUNT(DISTINCT p.id) >= :min_listings
             ORDER BY listing_count DESC
         """
         
@@ -65,19 +75,23 @@ class AdvancedInsightsAnalyzer:
     
     def get_underpriced_properties(self, threshold_pct: float = 20, limit: int = 50) -> pd.DataFrame:
         """Find properties priced significantly below area average."""
-        # First get area averages
-        area_avg = """
-            SELECT p.geography, AVG(ps.price_per_sqm) as area_avg_price_sqm
-            FROM properties p
-            JOIN property_snapshots ps ON p.id = ps.property_id
-            WHERE p.is_active = 1 AND ps.price_per_sqm IS NOT NULL AND p.geography IS NOT NULL
-            GROUP BY p.geography
-            HAVING COUNT(*) >= 3
-        """
-        
-        query = f"""
-            WITH area_avgs AS ({area_avg})
-            SELECT 
+        # Use latest snapshot per property to avoid duplicates
+        query = """
+            WITH latest_snapshots AS (
+                SELECT property_id, MAX(collected_at) as max_date
+                FROM property_snapshots
+                GROUP BY property_id
+            ),
+            area_avgs AS (
+                SELECT p.geography, AVG(ps.price_per_sqm) as area_avg_price_sqm
+                FROM properties p
+                JOIN property_snapshots ps ON p.id = ps.property_id
+                JOIN latest_snapshots ls ON ps.property_id = ls.property_id AND ps.collected_at = ls.max_date
+                WHERE p.is_active = 1 AND ps.price_per_sqm IS NOT NULL AND p.geography IS NOT NULL
+                GROUP BY p.geography
+                HAVING COUNT(DISTINCT p.id) >= 3
+            )
+            SELECT
                 p.id,
                 p.geography,
                 p.category,
@@ -90,14 +104,15 @@ class AdvancedInsightsAnalyzer:
                 ((aa.area_avg_price_sqm - ps.price_per_sqm) / aa.area_avg_price_sqm * 100) as discount_pct
             FROM properties p
             JOIN property_snapshots ps ON p.id = ps.property_id
+            JOIN latest_snapshots ls ON ps.property_id = ls.property_id AND ps.collected_at = ls.max_date
             JOIN area_avgs aa ON p.geography = aa.geography
-            WHERE p.is_active = 1 
+            WHERE p.is_active = 1
               AND ps.price_per_sqm IS NOT NULL
               AND ps.price_per_sqm < aa.area_avg_price_sqm * (1 - :threshold/100.0)
             ORDER BY discount_pct DESC
             LIMIT :limit
         """
-        
+
         return pd.read_sql(query, self.session.bind, params={"threshold": threshold_pct, "limit": limit})
     
     # ==================== FLOOR PREMIUM ANALYSIS ====================
