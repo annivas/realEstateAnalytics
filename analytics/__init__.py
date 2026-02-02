@@ -11,6 +11,12 @@ from .investor_tools import InvestorAnalyzer
 from .watchlist import WatchlistAnalyzer
 from .price_prediction import PricePredictionAnalyzer
 from .alerts import AlertManager
+from .property_insights import (
+    PropertyInsightsAnalyzer,
+    PropertyInsight,
+    get_property_insights,
+    print_insights,
+)
 
 __all__ = [
     "PriceTrendsAnalyzer",
@@ -23,4 +29,8 @@ __all__ = [
     "WatchlistAnalyzer",
     "PricePredictionAnalyzer",
     "AlertManager",
+    "PropertyInsightsAnalyzer",
+    "PropertyInsight",
+    "get_property_insights",
+    "print_insights",
 ]

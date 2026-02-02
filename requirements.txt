@@ -10,6 +10,9 @@ sqlalchemy>=2.0.0
 # HTTP Client
 httpx>=0.25.0
 
+# Web Scraping
+playwright>=1.40.0
+
 # Scheduler
 apscheduler>=3.10.0
 

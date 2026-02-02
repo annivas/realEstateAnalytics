@@ -97,6 +97,7 @@ from analytics.area_analysis import AreaAnalyzer
 from analytics.agent_analysis import AgentAnalyzer
 from analytics.advanced_insights import AdvancedInsightsAnalyzer
 from analytics.investor_tools import InvestorAnalyzer
+from analytics.property_insights import PropertyInsightsAnalyzer
 from config import MONITORED_AREAS
 
 from dashboard.components.metrics import render_metric_cards, render_stat_box
@@ -1690,7 +1691,53 @@ def render_property_insights_page():
     """Render property insights page with floor and size analysis."""
     st.title("Property Insights")
     st.markdown("Detailed analysis of property characteristics and pricing")
-    
+
+    # Scraped Data Insights Section
+    st.subheader("🔍 Detailed Property Data Insights")
+    st.markdown("Insights from scraped listing page data (energy class, amenities, construction year)")
+
+    scraped_analyzer = PropertyInsightsAnalyzer()
+    try:
+        insights = scraped_analyzer.get_all_insights()
+
+        if insights:
+            # Group insights by category
+            categories = {}
+            for insight in insights:
+                if insight.category not in categories:
+                    categories[insight.category] = []
+                categories[insight.category].append(insight)
+
+            # Display insights in columns by category
+            cols = st.columns(len(categories))
+            for i, (category, cat_insights) in enumerate(categories.items()):
+                with cols[i]:
+                    st.markdown(f"**{category.upper()}**")
+                    for insight in cat_insights[:4]:  # Show top 4 per category
+                        st.metric(insight.title, insight.value, help=insight.description)
+        else:
+            st.info("No detailed insights available yet. Run the scraper to collect detailed property data: `python scripts/scrape_details.py`")
+
+        # Scraped data coverage
+        session = get_session()
+        try:
+            from sqlalchemy import func
+            total_active = session.query(func.count(Property.id)).filter(Property.is_active == True).scalar() or 0
+            total_scraped = session.query(func.count(Property.id)).filter(
+                Property.details_scraped_at.isnot(None),
+                Property.is_active == True
+            ).scalar() or 0
+
+            if total_active > 0:
+                coverage = (total_scraped / total_active) * 100
+                st.progress(coverage / 100, text=f"Scraping Coverage: {total_scraped:,} / {total_active:,} ({coverage:.1f}%)")
+        finally:
+            session.close()
+    finally:
+        scraped_analyzer.close()
+
+    st.markdown("---")
+
     with AdvancedInsightsAnalyzer() as analyzer:
         # Floor Premium Analysis
         st.subheader("🏢 Floor Premium Analysis")
